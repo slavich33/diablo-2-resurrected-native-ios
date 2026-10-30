@@ -138,4 +138,27 @@ final class ProtocolTests: XCTestCase {
         try verifier.verify(manifest: manifest, expectedSHA256: fixture["sha256"] as! String,
                             signatureBase64: fixture["signatureBase64"] as! String, signingKeyID: "dotnet-test")
     }
+
+    func testRefreshRevokeAndAuthenticatedScheduleContracts() async throws {
+        let transport = FixtureTransport()
+        let payload = Data("{\"accessToken\":\"test-access\",\"refreshToken\":\"test-refresh\",\"expiresAtUtc\":\"2027-01-01T00:00:00Z\",\"refreshExpiresAtUtc\":\"2027-02-01T00:00:00Z\"}".utf8)
+        let saved = try ReimaginedJSON.decoder().decode(LauncherSession.self, from: payload)
+        let api = try ReimaginedAPIClient(transport: transport)
+        transport.bytes = payload
+        _ = try await api.refresh(saved)
+        XCTAssertEqual(transport.requests.last?.url?.path, "/auth/launcher/refresh")
+        XCTAssertNil(transport.requests.last?.value(forHTTPHeaderField: "Authorization"))
+        let refresh = try JSONSerialization.jsonObject(with: transport.requests.last!.httpBody!) as! [String: String]
+        XCTAssertEqual(refresh, ["refreshToken": "test-refresh"])
+        transport.bytes = Data()
+        transport.status = 204
+        try await api.revoke(saved)
+        XCTAssertEqual(transport.requests.last?.url?.path, "/auth/launcher/revoke")
+        transport.status = 200
+        transport.bytes = Data("[]".utf8)
+        let active = try await api.activeLadders(accessToken: saved.accessToken)
+        XCTAssertTrue(active.isEmpty)
+        XCTAssertEqual(transport.requests.last?.url?.path, "/ladders/active")
+        XCTAssertEqual(transport.requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer test-access")
+    }
 }

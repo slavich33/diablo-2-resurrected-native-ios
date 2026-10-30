@@ -10,8 +10,19 @@ public protocol HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 
-public final class SessionTransport: NSObject, HTTPTransport, URLSessionTaskDelegate {
-    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+public final class SessionTransport: HTTPTransport {
+    private let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
+
+    public init() {}
+    deinit { session.invalidateAndCancel() }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (stream, response) = try await session.bytes(for: request)
@@ -25,11 +36,6 @@ public final class SessionTransport: NSObject, HTTPTransport, URLSessionTaskDele
         return (bytes, http)
     }
 
-    public func urlSession(_ session: URLSession, task: URLSessionTask,
-                           willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
-                           completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(nil)
-    }
 }
 
 public final class ReimaginedAPIClient {
@@ -49,6 +55,22 @@ public final class ReimaginedAPIClient {
     public func schedule(accessToken: String? = nil) async throws -> LadderSchedule {
         let (bytes, _) = try await json(path: "ladders/schedule", token: accessToken)
         return try ReimaginedJSON.decoder().decode(LadderSchedule.self, from: bytes)
+    }
+
+    public func activeLadders(accessToken: String? = nil) async throws -> [LadderPolicy] {
+        let (bytes, _) = try await json(path: "ladders/active", token: accessToken)
+        return try ReimaginedJSON.decoder().decode([LadderPolicy].self, from: bytes)
+    }
+
+    public func refresh(_ session: LauncherSession) async throws -> LauncherSession {
+        let body = try JSONSerialization.data(withJSONObject: ["refreshToken": session.refreshToken])
+        let (bytes, _) = try await json(path: "auth/launcher/refresh", method: "POST", body: body)
+        return try ReimaginedJSON.decoder().decode(LauncherSession.self, from: bytes)
+    }
+
+    public func revoke(_ session: LauncherSession) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["refreshToken": session.refreshToken])
+        _ = try await json(path: "auth/launcher/revoke", method: "POST", body: body)
     }
 
     public func policy(for entry: LadderScheduleEntry, accessToken: String? = nil) async throws -> LadderPolicy {
@@ -87,7 +109,7 @@ public final class ReimaginedAPIClient {
     }
 }
 
-public struct LauncherSession: Decodable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct LauncherSession: Codable, CustomStringConvertible, CustomDebugStringConvertible {
     public let accessToken: String
     public let expiresAtUtc: Date
     public let refreshToken: String
