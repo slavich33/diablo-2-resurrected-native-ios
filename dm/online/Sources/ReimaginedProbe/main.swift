@@ -8,6 +8,8 @@ import Security
 
 @main
 struct Probe {
+    // The developer probe and the signed iOS app keep independent sessions.
+    private static let keychain = SessionKeychain(service: "org.d2rmobile.reimagined.probe.v1")
     static func main() async {
         #if os(macOS)
         // Process-local only: legacy Keychain reads must fail rather than
@@ -19,7 +21,7 @@ struct Probe {
             var session: LauncherSession?
             let args = Array(CommandLine.arguments.dropFirst())
             if args == ["--check-game-token"] {
-                let store = SessionKeychain()
+                let store = keychain
                 guard var saved = try store.load(origin: api.origin), saved.refreshExpiresAtUtc > Date() else {
                     fputs("No usable native-client session is available.\n", stderr); exit(1)
                 }
@@ -33,6 +35,16 @@ struct Probe {
                 print("Server issued a narrow game-session token. Token value is not logged or persisted.")
                 try await api.revokeGameToken(game)
                 print("Game-token revoke request accepted. No game connection or character write was attempted.")
+                if game.expiresAtUtc > Date().addingTimeInterval(5) {
+                    do {
+                        try await api.revokeGameToken(game)
+                        print("Repeat revoke was accepted; independent rejection was not established.")
+                    } catch ClientError.http(401) {
+                        print("Revocation verified: the server rejected the still-unexpired game token with HTTP 401.")
+                    } catch {
+                        print("Post-revoke authentication check was inconclusive.")
+                    }
+                }
                 return
             } else if args.count == 2, args[0] == "--login-url-file" {
                 let login = try LoopbackLogin()
@@ -43,16 +55,16 @@ struct Probe {
                 fflush(stdout)
                 let callback = try await login.waitForCallback(timeout: 600)
                 session = try await api.exchange(authorization: login.authorization, callback: callback)
-                try SessionKeychain().save(session!, origin: api.origin)
+                try keychain.save(session!, origin: api.origin)
                 print("Authorized session stored in this application's local Keychain.")
             } else if args == ["--signed-schedule"] {
-                session = try SessionKeychain().load(origin: api.origin)
+                session = try keychain.load(origin: api.origin)
                 guard let saved = session, saved.expiresAtUtc > Date() else {
                     fputs("No unexpired session is available. Sign in first.\n", stderr)
                     exit(1)
                 }
             } else if args == ["--sign-out"] {
-                let store = SessionKeychain()
+                let store = keychain
                 if let saved = try store.load(origin: api.origin) { try await api.revoke(saved) }
                 try store.remove(origin: api.origin)
                 print("Native-client session revoked and removed. Website sign-in is unchanged.")

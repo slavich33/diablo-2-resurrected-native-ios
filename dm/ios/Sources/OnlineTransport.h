@@ -8,7 +8,8 @@ extern "C" {
 // concurrently with another operation; after release the handle is invalid.
 // Open connects asynchronously. State: 1 connecting, 2 ready, 3 EOF, 4 closed,
 // 5 failed. Error returns the native error code without credentials or payload.
-void *dm_online_tcp_open(const char *host, uint16_t port, uint32_t timeout_ms);
+// Port is deliberately 32-bit at the host boundary; valid range is 1..65535.
+void *dm_online_tcp_open(const char *host, uint32_t port, uint32_t timeout_ms);
 int32_t dm_online_tcp_state(void *handle);
 int32_t dm_online_tcp_error(void *handle);
 // Send: 0 = queued locally, not peer acknowledgement. Read: >0 = byte count.

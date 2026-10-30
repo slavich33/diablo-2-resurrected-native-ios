@@ -176,9 +176,11 @@ public final class GameTCPStream: @unchecked Sendable {
 
 // C ABI used by native engine adapters; handles are owned and released by the caller.
 @_cdecl("dm_online_tcp_open")
-public func nativeGameTCPOpen(_ host: UnsafePointer<CChar>?, _ port: UInt16, _ timeout: UInt32) -> UnsafeMutableRawPointer? {
-    guard let host, strnlen(host, 254) < 254, let text = String(validatingCString: host),
-          let stream = GameTCPStream(host: text, port: port, timeoutMilliseconds: timeout) else { return nil }
+public func nativeGameTCPOpen(_ host: UnsafePointer<CChar>?, _ port: UInt32, _ timeout: UInt32) -> UnsafeMutableRawPointer? {
+    // Keep the host ABI at least 32-bit: Horizon callers need not extend
+    // sub-32-bit arguments as Apple AAPCS64 requires (see host/hle.h).
+    guard port <= UInt16.max, let host, strnlen(host, 254) < 254, let text = String(validatingCString: host),
+          let stream = GameTCPStream(host: text, port: UInt16(port), timeoutMilliseconds: timeout) else { return nil }
     return Unmanaged.passRetained(stream).toOpaque()
 }
 

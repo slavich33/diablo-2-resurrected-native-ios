@@ -23,7 +23,9 @@ final class GameTransportTests: XCTestCase {
         let queue = DispatchQueue(label: "transport-test-peer")
         let listening = expectation(description: "listener ready")
         let requestReceived = expectation(description: "peer receives client bytes")
-        let request = Data("native-client-fixture".utf8)
+        let request = try ControlMessage(kind: 7, payload: Data([1, 2, 3, 4])).clientCarrier()
+        let expectedRequest = Data([0xd0, 22, 0, 0x44, 0x32, 0x52, 0x4c, 1, 7])
+            + Data(repeating: 0, count: 10) + Data([4, 0, 1, 2, 3, 4])
         let reply = Data((0..<600_000).map { UInt8(truncatingIfNeeded: $0) })
         listener.stateUpdateHandler = { if case .ready = $0 { listening.fulfill() } }
         let peer = PeerHolder()
@@ -35,7 +37,7 @@ final class GameTransportTests: XCTestCase {
                     if let data { received.append(data) }
                     guard error == nil else { XCTFail("peer receive failed"); return }
                     if received.count < request.count { next(); return }
-                    XCTAssertEqual(received, request)
+                    XCTAssertEqual(received, expectedRequest)
                     requestReceived.fulfill()
                     connection.send(content: reply, contentContext: .finalMessage, isComplete: true,
                                     completion: .contentProcessed { error in XCTAssertNil(error) })
@@ -48,7 +50,7 @@ final class GameTransportTests: XCTestCase {
         defer { peer.cancel(); listener.cancel() }
         await fulfillment(of: [listening], timeout: 3)
         let port = try XCTUnwrap(listener.port?.rawValue)
-        let handle = try XCTUnwrap("127.0.0.1".withCString { nativeGameTCPOpen($0, port, 2_000) })
+        let handle = try XCTUnwrap("127.0.0.1".withCString { nativeGameTCPOpen($0, UInt32(port), 2_000) })
         defer { nativeGameTCPRelease(handle) }
         try await until { nativeGameTCPState(handle) == GameTCPStream.State.ready.rawValue }
         XCTAssertEqual(request.withUnsafeBytes { nativeGameTCPSend(handle, $0.baseAddress, UInt($0.count)) }, 0)
@@ -95,6 +97,7 @@ final class GameTransportTests: XCTestCase {
         XCTAssertNil(nativeGameTCPOpen(nil, 4_000, 1_000))
         XCTAssertNil("https://example.test".withCString { nativeGameTCPOpen($0, 4_000, 1_000) })
         XCTAssertNil("127.0.0.1".withCString { nativeGameTCPOpen($0, 0, 1_000) })
+        XCTAssertNil("127.0.0.1".withCString { nativeGameTCPOpen($0, 65_536, 1_000) })
         let handle = try XCTUnwrap("127.0.0.1".withCString { nativeGameTCPOpen($0, 1, 100) })
         defer { nativeGameTCPRelease(handle) }
         var byte: UInt8 = 0

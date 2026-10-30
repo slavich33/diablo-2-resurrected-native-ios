@@ -13,6 +13,7 @@ Implemented:
 - Local application Keychain session storage, refresh/revocation requests and an explicit native-client sign-out command.
 - SHA-256 and P-256/P1363 signature verification over exact manifest bytes using caller-pinned public keys. This is one prerequisite, not complete signed-package validation.
 - D2EM v3 outer-envelope framing: bounded little-endian fields, duplicate-ID rejection and unknown-required-field rejection. Field payload semantics and game admission remain unimplemented.
+- D2RL v1 control-message codec, client-to-server carrier and bounded environment-manifest fragmentation/assembly. See [the partial protocol observations](docs/CONTROL_PROTOCOL.md); server reply semantics and live interoperability remain unverified.
 - Native TCP byte transport using Network.framework, with nonblocking C polling exports for a future verified engine adapter. Receive/send queues are bounded; backpressure, peer EOF and errors are observable. It does not implement D2RLoader packet framing or admission.
 - Narrow game-session token issuance/revocation and ladder launch-ticket request contracts, including expiry and bundle-identity checks. No automatic fallback to a launcher token.
 - Per-account/per-ladder local save directory preparation that does not copy, move, upload or enumerate characters. The live game's `DM_SAVE` mount is not switched.
@@ -28,12 +29,17 @@ swift run --package-path dm/online reimagined-probe
 # Independent C caller and POSIX TCP peer; no game or account is used.
 bash dm/online/Tests/NativeTransportABI/run.sh
 # Explicit browser sign-in; choose a private output path outside the repository.
-swift run --package-path dm/online reimagined-probe --login-url-file /tmp/reimagined-authorize-url
-swift run --package-path dm/online reimagined-probe --signed-schedule
+swift build --package-path dm/online
+D2R_PROBE_BIN="$(swift build --package-path dm/online --show-bin-path)/reimagined-probe"
+# For a persistent development session, sign this executable with your own
+# stable identity before signing in; keep the same identifier on updates.
+# codesign --force --sign "<YOUR_SIGNING_IDENTITY>" --identifier org.d2rmobile.reimagined.probe "$D2R_PROBE_BIN"
+"$D2R_PROBE_BIN" --login-url-file /tmp/reimagined-authorize-url
+"$D2R_PROBE_BIN" --signed-schedule
 # Explicit authenticated API check: issues and immediately requests revocation
 # of a short-lived game token; never joins a game or writes a character.
-swift run --package-path dm/online reimagined-probe --check-game-token
-swift run --package-path dm/online reimagined-probe --sign-out
+"$D2R_PROBE_BIN" --check-game-token
+"$D2R_PROBE_BIN" --sign-out
 ```
 
 The library supports iOS 16+ and macOS 13+. The command-line probe runs on macOS. Its default mode only reads `GET /ladders/schedule` and `GET /ladders/active`. An empty anonymous list does not establish what an authenticated user sees. Both lists also returned empty after the authorized native-client sign-in on 2026-10-30; this is a time-specific observation, not a claim that the service has no ladders.
@@ -46,9 +52,13 @@ The pause menu's **More → Reimagined Online** entry shares the native tools sh
 
 For an account-screen-only launch, use `-mode online`. That mode does not start the game host. The on-device overlay still needs regeneration and the complete app needs a build before the new pause-menu label is visible. The screen can read available metadata; it does not install a ladder package, obtain admission or modify character saves.
 
-Verification for this integration: 27 library tests pass, including real loopback TCP transfer through backpressure/EOF and an independent C ABI/POSIX-peer check; the new Swift sources compile for ARM64 iOS; and the actual native tools sheet, account screen and close action were exercised in a separate Mac Catalyst harness without game assets. This does not establish physical-iPhone behavior or a complete game build.
+Verification for this integration: 32 library tests pass, including real loopback TCP transfer through backpressure/EOF and an independent C ABI/POSIX-peer check; the new Swift sources compile for ARM64 iOS; and the actual native tools sheet, account screen and close action were exercised in a separate Mac Catalyst harness without game assets. This does not establish physical-iPhone behavior or a complete game build.
 
-The game-token and launch-ticket HTTP contracts are fixture-tested. The new live game-token probe was stopped before any API request because macOS denied the rebuilt ad-hoc executable access to its earlier legacy-Keychain session (`-25293`). The probe now disallows process-local Keychain dialogs and fails promptly. Earlier native PKCE sign-in remains a separate verified observation; no successful game-token issuance or ticket request is claimed here.
+Production verification on 2026-10-30: a developer-signed native macOS probe completed PKCE login, issued a game-session token, requested its revocation, and independently received HTTP 401 when reusing the still-unexpired token. A changed executable signed with the same client identity also read its saved session successfully. Launch-ticket requests remain fixture-tested only; no game admission or server-character write has been attempted.
+
+The probe uses its own Keychain namespace, separate from the iOS app. For repeated development builds, sign the probe with a stable signing identity and identifier `org.d2rmobile.reimagined.probe` before signing in. An ad-hoc executable may lose access to its item after a rebuild. The CLI disables process-local legacy-Keychain dialogs, so a denied access fails promptly rather than hanging. No existing protected legacy item is deleted or migrated.
+
+The read-only engine-input check validates the original Switch `3.3.94012` NSO module ID, all three decompressed segment hashes and the existing command/system-delivery call-site windows. It neither installs hooks nor verifies runtime admission. Use `python3 dm/online/tools/check_engine_input.py /path/to/original/ExeFS/main`. The C transport port argument is 32-bit at the host boundary to avoid the Apple/Horizon sub-32-bit calling-convention difference described in `dm/host/hle.h`.
 
 ## Remaining integration
 
