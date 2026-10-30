@@ -62,6 +62,11 @@ public final class ReimaginedAPIClient {
         return try ReimaginedJSON.decoder().decode([LadderPolicy].self, from: bytes)
     }
 
+    public func regions(ladderID: UUID, accessToken: String? = nil) async throws -> [LobbyRegion] {
+        let (bytes, _) = try await json(path: "lobby/ladders/\(ladderID.uuidString.lowercased())/regions", token: accessToken)
+        return try ReimaginedJSON.decoder().decode([LobbyRegion].self, from: bytes)
+    }
+
     public func refresh(_ session: LauncherSession) async throws -> LauncherSession {
         let body = try JSONSerialization.data(withJSONObject: ["refreshToken": session.refreshToken])
         let (bytes, _) = try await json(path: "auth/launcher/refresh", method: "POST", body: body)

@@ -590,10 +590,10 @@ def _pause_no_help(ys, hide=('Help',), restart_y=None, extra=()):
     # 点击改发 PanelManager:ClosePanel:TouchShareLog（关一个不存在的面板 = 空操作，宿主当信号收，dm/host/diag.c → 外壳 dm/ios/Sources/dm_sharelog.m 弹系统分享面板）
     # Do not replace the image and text of the original game's buttons (the approach of swapping in the front-end button image + enlarged white text looked bad and was withdrawn); the 「消息记录」(Message Log) entry is dropped.
     # Finger size is not handled by changing the look: with fewer entries the spacing is opened up (center spacing 240 units ≈ 9.4 mm), and hit expansion is left to the input layer's nearest-target snapping
-    # 「分享诊断日志」(Share Diagnostics): borrows the original game's 「消息记录」(Message Log) button (same button image, same font), changes the text,
-    # and the tap is changed to send PanelManager:ClosePanel:TouchShareLog (closing a panel that does not exist = no-op, which the host receives as a signal; dm/host/diag.c → the shell dm/ios/Sources/dm_sharelog.m pops up the system share sheet)
+    # 「更多」沿用原版「消息记录」按钮和 TouchShareLog 空操作信号；宿主弹出联机账户/分享诊断工具菜单。
+    # More borrows the original Message Log button and its TouchShareLog no-op signal; the host opens account/diagnostic tools.
     def fn(s):
-        s = _sub1(s, '"textString": "@minipanelmessage",', '"textString": "@dmPauseShareLog",')
+        s = _sub1(s, '"textString": "@minipanelmessage",', '"textString": "@dmPauseTools",')
         s = _sub1(s, '"onClickMessage": "PanelManager:OpenPanel:MessageLogPanel",', '"onClickMessage": "PanelManager:ClosePanel:TouchShareLog",')
         s, n = offscreen(s, types=(), names=hide)
         if n != len(hide): raise SystemExit('touch_layout：暂停菜单要挪走的按钮应为 %d 个，找到 %d 个' % (len(hide), n))

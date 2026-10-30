@@ -17,6 +17,7 @@ targets:
           [ -f "$SRCROOT/Gen/assets/NativeHUD/v4/hud.json" ] && [ -f "$SRCROOT/Sources/dm_touch_native_art.c" ] || python3 "$SRCROOT/tools/gen_assets.py"
     sources:
       - Sources
+      - path: ../online/Sources/ReimaginedClient
       - Assets.xcassets               # App 图标（1024²、不透明；TestFlight 上传必需） | App icon (1024², opaque; required for TestFlight upload)
       - path: Gen/assets/NativeHUD/v4/hud_v4_ui     # 底部 UI v4 的 UIKit 素材（run.sh build 由 tools/gen_hud_v4.py 从游戏文件生成：几何、字形、难度数字、选择条格子） | UIKit art for bottom UI v4 (generated from game files by tools/gen_hud_v4.py during run.sh build: geometry, glyphs, difficulty digits, selection bar cells)
         type: folder
@@ -111,6 +112,8 @@ targets:
       GCC_C_LANGUAGE_STANDARD: gnu11
       OTHER_CFLAGS: $(inherited) -mcpu=apple-a18   # 只给 iPhone 17 Pro Max（A19）用；宿主汇编里有 LSE 原子指令，默认 a10 基线不认 | Only for iPhone 17 Pro Max (A19); the host assembly contains LSE atomic instructions, which the default a10 baseline does not accept
       CLANG_ENABLE_OBJC_ARC: YES
+      SWIFT_VERSION: "5.0"
+      SWIFT_OBJC_BRIDGING_HEADER: Sources/OnlineBridge.h
       DEBUG_INFORMATION_FORMAT: dwarf
   RomfsDownloader:
     type: extensionkit-extension

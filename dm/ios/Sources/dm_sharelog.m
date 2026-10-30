@@ -1,3 +1,5 @@
+// 暂停菜单「更多」打开联机账户/诊断工具；分享操作仍按下面的隐私边界执行。
+// Pause-menu More opens account/diagnostic tools; sharing retains the privacy boundaries described below.
 // 暂停菜单「分享诊断日志」的 iOS 侧。
 // 按钮是游戏自己的控件（布局 tools/touch_layout.py 的 _pause_no_help：借原版「消息记录」按钮，换字、改发 PanelManager:ClosePanel:TouchShareLog），
 // 宿主收到这条空操作消息后调这里登记的回调（dm/host/diag.c）。这里做两件：
@@ -115,5 +117,24 @@ static void on_click(void) {   // 宿主在游戏主线程调：玩家点了「�
         });
     });
 }
-void dm_sharelog_boot(void) { g_t0 = NSDate.date; dm_sharelog_init(on_click); }   // main.m 起宿主前调一次 | main.m calls this once before starting the host
+// 暂停菜单的原生工具入口；分享功能仍可单独调用。
+// Native tools entry for the pause menu; sharing remains independently callable.
+static void on_tools_click(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = top_vc();
+        if (!vc || vc.presentingViewController || [vc isKindOfClass:UIAlertController.class]) return;
+        UIAlertController *menu = [UIAlertController alertControllerWithTitle:@(dm_ui("dmPauseTools")) message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+        [menu addAction:[UIAlertAction actionWithTitle:@(dm_ui("dmOnlineTitle")) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [vc dismissViewControllerAnimated:YES completion:^{ void dm_online_present(void); dm_online_present(); }];
+        }]];
+        [menu addAction:[UIAlertAction actionWithTitle:@(dm_ui("dmPauseShareLog")) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [vc dismissViewControllerAnimated:YES completion:^{ on_click(); }];
+        }]];
+        [menu addAction:[UIAlertAction actionWithTitle:@(dm_ui("dmOnlineClose")) style:UIAlertActionStyleCancel handler:nil]];
+        UIPopoverPresentationController *pp = menu.popoverPresentationController;
+        if (pp) { pp.sourceView = vc.view; pp.sourceRect = CGRectMake(CGRectGetMidX(vc.view.bounds), CGRectGetMidY(vc.view.bounds), 1, 1); pp.permittedArrowDirections = 0; }
+        [vc presentViewController:menu animated:YES completion:nil];
+    });
+}
+void dm_sharelog_boot(void) { g_t0 = NSDate.date; dm_sharelog_init(on_tools_click); }   // main.m 起宿主前调一次 | main.m calls this once before starting the host
 void dm_sharelog_share(void) { on_click(); }   // 游戏外的界面直接调（资源下载页的「分享诊断日志」按钮，main.m AssetVC） | called directly from screens outside the game (the "Share diagnostic log" button on the asset download page, main.m AssetVC)

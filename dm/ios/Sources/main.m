@@ -1141,6 +1141,7 @@ static void astc_handoff(UIWindow *w) {   // 补充包到位（玩家刚拷好 /
     else if ([g_mode isEqualToString:@"boot"] && g_no_bc) { vc = [NoBcVC new]; vc.view.backgroundColor = UIColor.blackColor; }   // 本机型不支持：只弹框 | This device model is not supported: only show an alert
     else if ([g_mode isEqualToString:@"boot"] && g_need_assets) vc = [AssetVC new];   // 资源包没到：下载界面 | Asset pack not here yet: download screen
     else if ([g_mode isEqualToString:@"boot"]) vc.view = front_ios_view(ws.coordinateSpace.bounds);   // 图形后端出图的层（不叠任何控件） | The layer the graphics backend presents into (no widgets stacked on it)
+    else if ([g_mode isEqualToString:@"online"]) { void *dm_online_root_controller(void); vc = (__bridge_transfer UIViewController *)dm_online_root_controller(); }
     else if ([g_mode isEqualToString:@"blank"]) { UIView *front_ios_blank_view(CGRect); vc.view = front_ios_blank_view(ws.coordinateSpace.bounds); }   // 发热负对照 | Heat negative control
     else {   // 探针模式：屏上标出模式名 | Probe mode: show the mode name on screen
         UILabel *l = [[UILabel alloc] initWithFrame:vc.view.bounds];
@@ -1232,6 +1233,7 @@ static void bg_relaunch_test(void) {
     plog("dm iOS 模式 %s · %s %s", g_mode.UTF8String, UIDevice.currentDevice.systemName.UTF8String, UIDevice.currentDevice.systemVersion.UTF8String);
     plog("启动计时 T1 静态构造 %.1f ms · T2 main %.1f ms · T3 didFinishLaunching %.1f ms（零点 = 进程创建）", g_T[1], g_T[2], g_T[3]);
     if ([g_mode isEqualToString:@"boot"]) { plog("boot: 启动完成，宿主等场景到前台再起（applicationState=%ld）", (long)a.applicationState); bg_relaunch_test(); return YES; }   // 资源没到的另等 AssetVC 下完 | if the assets have not arrived, this waits separately for AssetVC to finish downloading
+    if ([g_mode isEqualToString:@"online"]) return YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ run_mode(); });
     return YES;
 }

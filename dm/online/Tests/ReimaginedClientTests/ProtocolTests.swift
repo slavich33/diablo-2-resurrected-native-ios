@@ -161,4 +161,18 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(transport.requests.last?.url?.path, "/ladders/active")
         XCTAssertEqual(transport.requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer test-access")
     }
+
+    func testLobbyRegionSnakeCaseContract() async throws {
+        let transport = FixtureTransport()
+        transport.bytes = Data("[{\"id\":\"eu-central\",\"name\":\"Europe Central\",\"available\":true,\"ping_targets\":[\"test.example\"]},{\"id\":\"test-offline\",\"name\":\"Test offline\",\"available\":false}]".utf8)
+        let api = try ReimaginedAPIClient(transport: transport)
+        let regions = try await api.regions(ladderID: UUID(uuidString: id)!, accessToken: "test-access")
+        XCTAssertEqual(regions.count, 2)
+        XCTAssertEqual(regions[0].pingTargets, ["test.example"])
+        XCTAssertTrue(regions[0].available)
+        XCTAssertNil(regions[1].pingTargets)
+        XCTAssertFalse(regions[1].available)
+        XCTAssertEqual(transport.requests.last?.url?.path, "/lobby/ladders/\(id)/regions")
+        XCTAssertEqual(transport.requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer test-access")
+    }
 }

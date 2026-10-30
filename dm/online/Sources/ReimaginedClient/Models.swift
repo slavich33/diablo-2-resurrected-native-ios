@@ -48,6 +48,18 @@ public struct BundleCompatibility: Decodable {
     public let supportedGameVersion: String
 }
 
+public struct LobbyRegion: Decodable, Equatable {
+    public let id: String
+    public let name: String
+    public let available: Bool
+    public let pingTargets: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, available
+        case pingTargets = "ping_targets"
+    }
+}
+
 public enum ReimaginedJSON {
     public static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
