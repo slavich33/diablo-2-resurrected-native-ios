@@ -1,0 +1,8 @@
+{
+  "manifestBase64": "eyJzY2hlbWFWZXJzaW9uIjoyLCJwdXJwb3NlIjoiaW50ZXJvcC10ZXN0In0=",
+  "sha256": "67C776A7A161CB036367E69036572DE00276B4C5219FAAEEC1FC695741771D46",
+  "signatureBase64": "VXmpuwHBpdO0tqLnuMzsZ8sCkHNMt8XkXAu9SgVo4OpnF36CP0F7tApRuY8zklwlC0H2Vtc3N/4jOLaeZ3sRIg==",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgLriZ++3WaL9rQXxjDNI5c02UEDK\n8uePMzf9BGv08r8GB/D45xkhHOlUCL+EfXf0+jztFqNhzo8qfrMAfeltOg==\n-----END PUBLIC KEY-----",
+  "signatureBytes": 64,
+  "generator": ".NET 10.0.14"
+}

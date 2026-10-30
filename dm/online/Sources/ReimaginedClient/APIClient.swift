@@ -1,0 +1,97 @@
+// 原生 HTTPS 客户端：公开赛季与策略读取，和真实 PKCE 授权码兑换。
+// Native HTTPS client: public schedule/policy reads and genuine PKCE authorization-code exchange.
+import Foundation
+
+public enum ClientError: Error, Equatable {
+    case invalidOrigin, invalidResponse, http(Int), oversizedResponse, policyChanged, scheduleMismatch
+}
+
+public protocol HTTPTransport {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+public final class SessionTransport: NSObject, HTTPTransport, URLSessionTaskDelegate {
+    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+
+    public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (stream, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
+        guard response.expectedContentLength <= 8 * 1024 * 1024 else { throw ClientError.oversizedResponse }
+        var bytes = Data()
+        for try await byte in stream {
+            guard bytes.count < 8 * 1024 * 1024 else { throw ClientError.oversizedResponse }
+            bytes.append(byte)
+        }
+        return (bytes, http)
+    }
+
+    public func urlSession(_ session: URLSession, task: URLSessionTask,
+                           willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                           completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+public final class ReimaginedAPIClient {
+    public static let production = URL(string: "https://api.d2r-reimagined.com/")!
+    public let origin: URL
+    private let transport: HTTPTransport
+
+    public init(origin: URL = ReimaginedAPIClient.production, transport: HTTPTransport = SessionTransport()) throws {
+        guard origin.scheme == "https", origin.host != nil, origin.user == nil, origin.password == nil,
+              origin.query == nil, origin.fragment == nil, origin.path == "/" || origin.path.isEmpty else {
+            throw ClientError.invalidOrigin
+        }
+        self.origin = origin
+        self.transport = transport
+    }
+
+    public func schedule(accessToken: String? = nil) async throws -> LadderSchedule {
+        let (bytes, _) = try await json(path: "ladders/schedule", token: accessToken)
+        return try ReimaginedJSON.decoder().decode(LadderSchedule.self, from: bytes)
+    }
+
+    public func policy(for entry: LadderScheduleEntry, accessToken: String? = nil) async throws -> LadderPolicy {
+        let (bytes, response) = try await json(path: "ladders/\(entry.id.uuidString.lowercased())/client-policy", token: accessToken)
+        guard response.value(forHTTPHeaderField: "X-Ladder-Policy-Version") == entry.policyVersion else {
+            throw ClientError.policyChanged
+        }
+        let policy = try ReimaginedJSON.decoder().decode(LadderPolicy.self, from: bytes)
+        guard policy.id == entry.id, policy.startDateUtc == entry.startDateUtc, policy.endDateUtc == entry.endDateUtc else {
+            throw ClientError.scheduleMismatch
+        }
+        return policy
+    }
+
+    public func exchange(authorization: PKCEAuthorization, callback: URL) async throws -> LauncherSession {
+        let body = try authorization.tokenExchangeBody(callback: callback)
+        let (bytes, _) = try await json(path: "auth/launcher/token", method: "POST", body: body)
+        let result = try ReimaginedJSON.decoder().decode(LauncherSession.self, from: bytes)
+        guard !result.accessToken.isEmpty, !result.refreshToken.isEmpty else { throw ClientError.invalidResponse }
+        return result
+    }
+
+    private func json(path: String, method: String = "GET", body: Data? = nil, token: String? = nil) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: origin.appendingPathComponent(path), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        request.httpMethod = method
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue("D2RMobile-Reimagined/0.1", forHTTPHeaderField: "User-Agent")
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (bytes, response) = try await transport.send(request)
+        guard (200..<300).contains(response.statusCode) else { throw ClientError.http(response.statusCode) }
+        guard bytes.count <= 8 * 1024 * 1024 else { throw ClientError.oversizedResponse }
+        return (bytes, response)
+    }
+}
+
+public struct LauncherSession: Decodable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let accessToken: String
+    public let expiresAtUtc: Date
+    public let refreshToken: String
+    public let refreshExpiresAtUtc: Date
+    public var description: String { "LauncherSession(<redacted>)" }
+    public var debugDescription: String { description }
+}
