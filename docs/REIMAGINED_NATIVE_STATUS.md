@@ -1,6 +1,6 @@
 # Native Reimagined integration: source and verified status
 
-Updated 2026-10-30. This is the public source fork at [slavich33/d2r-mobile](https://github.com/slavich33/d2r-mobile), based on [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Upstream authorship and the MIT license are preserved. Our current development branch is `reimagined-ios-online`.
+Updated 2026-10-31. This is the public source fork at [slavich33/d2r-mobile](https://github.com/slavich33/d2r-mobile), based on [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Upstream authorship and the MIT license are preserved. Our current development branch is `reimagined-ios-online`.
 
 The base project runs the user's own Switch ARM64 game program through native platform services on iOS/macOS. Our additions develop a native client for the existing Reimagined infrastructure. **Joining a Reimagined ladder game from iPhone is not yet implemented or verified.**
 
@@ -24,6 +24,8 @@ At source commit [`9a44620`](https://github.com/slavich33/d2r-mobile/commit/9a44
 - Genuine production browser authorization and authenticated API reads succeeded in a signed native macOS probe. Short-lived game-token issue/revocation succeeded; an independent repeat request with the revoked, unexpired token was rejected with HTTP 401. Session readback also succeeded after a signed probe binary update.
 
 These checks cover components. iPhone account login, live game admission, sustained multiplayer and server-character save/readback remain unverified. Upstream performance measurements in the main README describe the original project.
+
+On 2026-10-31, the signed macOS probe additionally read a live authenticated policy: one active Hallowing Ladder, bundle revision 3/schema 2, required mod 3.1.0, loader 1.3.1, launcher >= 0.19.6, game version 3.3, and 8 advertised/available regions. The policy header and schedule identity/date checks passed. These are API metadata observations; bundle artifact validation and an actual game session are pending. Repeat this read with `reimagined-probe --inspect-ladders` after signing in.
 
 ## Remaining implementation
 

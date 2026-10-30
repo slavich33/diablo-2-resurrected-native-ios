@@ -57,7 +57,7 @@ struct Probe {
                 session = try await api.exchange(authorization: login.authorization, callback: callback)
                 try keychain.save(session!, origin: api.origin)
                 print("Authorized session stored in this application's local Keychain.")
-            } else if args == ["--signed-schedule"] {
+            } else if args == ["--signed-schedule"] || args == ["--inspect-ladders"] {
                 session = try keychain.load(origin: api.origin)
                 guard let saved = session, saved.expiresAtUtc > Date() else {
                     fputs("No unexpired session is available. Sign in first.\n", stderr)
@@ -70,14 +70,32 @@ struct Probe {
                 print("Native-client session revoked and removed. Website sign-in is unchanged.")
                 return
             } else if !args.isEmpty {
-                fputs("Usage: reimagined-probe [--login-url-file PATH | --signed-schedule | --check-game-token | --sign-out]\n", stderr)
+                fputs("Usage: reimagined-probe [--login-url-file PATH | --signed-schedule | --inspect-ladders | --check-game-token | --sign-out]\n", stderr)
                 exit(2)
             }
             let schedule = try await api.schedule(accessToken: session?.accessToken)
             let formatter = ISO8601DateFormatter()
             print("Server time: \(formatter.string(from: schedule.serverTimeUtc))")
             print("Ladders visible \(session == nil ? "without sign-in" : "after sign-in"): \(schedule.ladders.count)")
-            for entry in schedule.ladders { print("\(entry.name): live=\(entry.isLive), policy=\(entry.policyVersion)") }
+            for entry in schedule.ladders {
+                print("\(entry.name): live=\(entry.isLive), policy=\(entry.policyVersion)")
+                if args == ["--inspect-ladders"] {
+                    let policy = try await api.policy(for: entry, accessToken: session?.accessToken)
+                    print("  Policy header, ladder ID and schedule dates agree.")
+                    if let bundle = policy.activeBundle {
+                        let c = bundle.compatibility
+                        print("  Bundle revision=\(bundle.revision), schema=\(bundle.schemaVersion), status=\(bundle.status), bytes=\(bundle.artifactSizeBytes)")
+                        print("  Required game=\(c.supportedGameVersion), mod=\(c.requiredModVersion), loader=\(c.requiredD2RLoaderVersion), launcher>=\(c.minimumLauncherVersion)")
+                        print("  Required core SHA256=\(c.requiredD2RCoreSha256)")
+                        print("  Required loader SHA256=\(c.requiredD2RLoaderSha256)")
+                        print("  Bundle metadata read; artifact signature/content validation is still required.")
+                    } else {
+                        print("  No active bundle is supplied by this policy.")
+                    }
+                    let regions = try await api.regions(ladderID: entry.id, accessToken: session?.accessToken)
+                    print("  Regions advertised=\(regions.count), available=\(regions.filter { $0.available }.count)")
+                }
+            }
             let active = try await api.activeLadders(accessToken: session?.accessToken)
             print("Active ladders: \(active.count)")
             print("HTTPS API read verified; native game admission and server saves remain disconnected.")

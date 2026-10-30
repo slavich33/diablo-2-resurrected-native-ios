@@ -36,6 +36,7 @@ D2R_PROBE_BIN="$(swift build --package-path dm/online --show-bin-path)/reimagine
 # codesign --force --sign "<YOUR_SIGNING_IDENTITY>" --identifier org.d2rmobile.reimagined.probe "$D2R_PROBE_BIN"
 "$D2R_PROBE_BIN" --login-url-file /tmp/reimagined-authorize-url
 "$D2R_PROBE_BIN" --signed-schedule
+"$D2R_PROBE_BIN" --inspect-ladders  # authenticated policy, compatibility and region reads
 # Explicit authenticated API check: issues and immediately requests revocation
 # of a short-lived game token; never joins a game or writes a character.
 "$D2R_PROBE_BIN" --check-game-token
