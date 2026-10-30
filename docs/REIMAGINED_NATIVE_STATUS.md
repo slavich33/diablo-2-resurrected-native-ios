@@ -1,6 +1,6 @@
 # Native Reimagined integration: source and verified status
 
-Updated 2026-10-31. This is the public source fork at [slavich33/d2r-mobile](https://github.com/slavich33/d2r-mobile), based on [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Upstream authorship and the MIT license are preserved. Our current development branch is `reimagined-ios-online`.
+Updated 2026-10-31. This is the public source fork at [slavich33/diablo-2-resurrected-native-ios](https://github.com/slavich33/diablo-2-resurrected-native-ios), based on [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Upstream authorship and the MIT license are preserved. Our current development branch is `reimagined-ios-online`.
 
 The base project runs the user's own Switch ARM64 game program through native platform services on iOS/macOS. Our additions develop a native client for the existing Reimagined infrastructure. **Joining a Reimagined ladder game from iPhone is not yet implemented or verified.**
 
@@ -16,7 +16,7 @@ The base project runs the user's own Switch ARM64 game program through native pl
 
 ## Confirmed checks
 
-At source commit [`9a44620`](https://github.com/slavich33/d2r-mobile/commit/9a446209f5df4db0a07d7a4522885f3479f358d2):
+At source commit [`9a44620`](https://github.com/slavich33/diablo-2-resurrected-native-ios/commit/9a446209f5df4db0a07d7a4522885f3479f358d2):
 
 - 33 Swift tests passed, including real local TCP peers, bounded buffering, EOF, API contracts and control/reference vectors.
 - 504 offline encoder/boundary cases matched the pinned official D2RLoader core: 276 control cases, 216 fragment cases and 12 client-carrier cases. 45 selected reference outputs/rejections are included in the Swift fixtures. The reference tooling substitutes generic container-memory operations in a bounded CPU model; it does not run a Windows game session. See the partial protocol document for reproduction.

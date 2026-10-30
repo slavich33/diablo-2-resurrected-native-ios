@@ -1,4 +1,14 @@
-# D2R Mobile
+# Diablo II: Resurrected — Native iOS / macOS Port
+
+**Diablo 2 / D2R for iPhone, iPad and Apple silicon Mac** — native ARM64 platform integration and Metal graphics, based on D2R Mobile. This fork develops Reimagined account, API and transport support; an actual ladder-game join and Server Saves remain unfinished.
+
+```sh
+git clone https://github.com/slavich33/diablo-2-resurrected-native-ios.git
+cd diablo-2-resurrected-native-ios
+```
+
+По-русски: исходники нативного Diablo II Resurrected для iOS и Mac, инструменты сборки и экспериментальная интеграция Reimagined. Онлайн-игра на iPhone пока не готова.
+
 
 **This fork: native Reimagined integration for iOS/macOS (experimental).**
 Our implementation is in [`dm/online`](dm/online), with the iOS account UI in [`dm/ios/Sources/dm_online.swift`](dm/ios/Sources/dm_online.swift).
