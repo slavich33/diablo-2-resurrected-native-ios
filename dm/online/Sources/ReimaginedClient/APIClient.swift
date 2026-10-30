@@ -67,6 +67,48 @@ public final class ReimaginedAPIClient {
         return try ReimaginedJSON.decoder().decode([LobbyRegion].self, from: bytes)
     }
 
+    /// Only the narrow game token may be handed to a future game/save adapter.
+    /// No fallback to the launcher's long-lived token on older servers.
+    public func createGameToken(session: LauncherSession, now: Date = Date()) async throws -> GameSessionToken? {
+        let bytes: Data
+        do { (bytes, _) = try await json(path: "auth/launcher/game-token", method: "POST", body: Data(), token: session.accessToken) }
+        catch ClientError.http(404) { return nil }
+        let result = try ReimaginedJSON.decoder().decode(GameSessionToken.self, from: bytes)
+        guard Self.validSecret(result.accessToken), result.expiresAtUtc > now else { throw ClientError.invalidResponse }
+        return result
+    }
+
+    public func revokeGameToken(_ token: GameSessionToken) async throws {
+        _ = try await json(path: "auth/launcher/game-token/revoke", method: "POST", body: Data(), token: token.accessToken)
+    }
+
+    /// Transport contract only: a returned ticket does not validate the bundle
+    /// or admit the native engine. Call only after complete bundle validation.
+    public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor, launcherVersion: String,
+                             session: LauncherSession, now: Date = Date()) async throws -> LadderLaunchTicket {
+        guard bundle.ladderId == ladderID, bundle.revision > 0,
+              bundle.artifactSha256.count == 64, bundle.artifactSha256.utf8.allSatisfy(Self.hexDigit),
+              !launcherVersion.isEmpty, launcherVersion.utf8.count <= 64,
+              launcherVersion.utf8.allSatisfy({ (33...126).contains($0) }) else { throw ClientError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "bundleId": bundle.id.uuidString.lowercased(), "bundleRevision": bundle.revision,
+            "launcherVersion": launcherVersion, "artifactSha256": bundle.artifactSha256
+        ])
+        let (bytes, _) = try await json(path: "ladders/\(ladderID.uuidString.lowercased())/launch-ticket", method: "POST", body: body, token: session.accessToken)
+        let result = try ReimaginedJSON.decoder().decode(LadderLaunchTicket.self, from: bytes)
+        guard result.ladderId == ladderID, result.bundleId == bundle.id, result.bundleRevision == bundle.revision,
+              result.expiresAtUtc > now, Self.validSecret(result.launchTicket) else { throw ClientError.invalidResponse }
+        return result
+    }
+
+    private static func validSecret(_ text: String) -> Bool {
+        !text.isEmpty && text.utf8.count <= 16_384 && text.utf8.allSatisfy { (33...126).contains($0) }
+    }
+
+    private static func hexDigit(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte) || (65...70).contains(byte) || (97...102).contains(byte)
+    }
+
     public func refresh(_ session: LauncherSession) async throws -> LauncherSession {
         let body = try JSONSerialization.data(withJSONObject: ["refreshToken": session.refreshToken])
         let (bytes, _) = try await json(path: "auth/launcher/refresh", method: "POST", body: body)
@@ -105,7 +147,7 @@ public final class ReimaginedAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("D2RMobile-Reimagined/0.1", forHTTPHeaderField: "User-Agent")
-        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let body, !body.isEmpty { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (bytes, response) = try await transport.send(request)
         guard (200..<300).contains(response.statusCode) else { throw ClientError.http(response.statusCode) }

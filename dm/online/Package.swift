@@ -1,6 +1,6 @@
 // swift-tools-version: 5.9
-// 原生 Apple 平台上的 Reimagined API 协议研究，不含游戏联网实现。
-// Reimagined API contract research for native Apple platforms; no gameplay networking implementation.
+// 原生 API 与 TCP 传输组件；尚未接入游戏准入和服务器角色。
+// Native API and TCP transport components; game admission and server characters remain disconnected.
 import PackageDescription
 
 let package = Package(

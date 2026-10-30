@@ -38,7 +38,7 @@ swift run --package-path dm/online reimagined-probe --sign-out
 
 只启动账户界面可使用 `-mode online`，不会启动游戏宿主。新的暂停菜单文字需要重新生成设备覆盖层并构建完整应用后才会显示。界面可以读取可用元数据，但不会安装天梯包、取得游戏准入或修改角色存档。
 
-本次验证：20 个库测试通过；新增 Swift 源码可编译为 ARM64 iOS；实际原生工具菜单、账户页与关闭返回已在不含游戏资源的独立 Mac Catalyst 宿主中验证。这不代表真机 iPhone 路径或完整游戏构建已经验证。
+本次验证：27 个库测试通过；新增 Swift 源码可编译为 ARM64 iOS；实际原生工具菜单、账户页与关闭返回已在不含游戏资源的独立 Mac Catalyst 宿主中验证。这不代表真机 iPhone 路径或完整游戏构建已经验证。
 
 ## 待完成的集成
 
@@ -57,3 +57,11 @@ Windows User-Agent 不能提供这些能力。公开启动器的 HTTP PKCE 兑�
 独立实现的 HTTP 字段约定参考 [Reimagined Launcher c77f983](https://github.com/D2R-Reimagined/reimagined-launcher/tree/c77f983fe40983f7d747ccc788065af9d4cd43ce)，主要包括 `ReimaginedApiHttpClient`、`LauncherAuthenticationService`、`LadderScheduleResponse` 和 `LadderBundleService`。
 
 [D2RLoader PluginSDK](https://github.com/D2RLoader/PluginSDK) 公开 Windows x64 插件接口。[安装器 README](https://github.com/D2RLoader/Installer#readme) 明确说明加载器核心闭源。[TCP/IP 指南](https://d2rloader.net/tcp-ip.html) 说明其独立恢复的 TCP/IP 联机模式。暴雪的 [2021 年测试 FAQ](https://news.blizzard.com/en-us/article/23688836/play-diablo-ii-resurrectedtm-during-the-early-access-open-beta) 将删除原 TCP/IP 模式归因于潜在安全风险，但没有详细描述漏洞。
+
+## 原生传输与游戏会话
+
+新增 Network.framework TCP 字节流和 `dm/ios/Sources/OnlineTransport.h` 的非阻塞 C 轮询接口。收发队列有上限，支持背压、断线、EOF 后读完剩余数据；这不是 D2RLoader 游戏包协议或准入实现。独立 C 调用方与 POSIX 对端的检查可运行 `bash dm/online/Tests/NativeTransportABI/run.sh`。
+
+新增短期游戏令牌申请/撤销、带过期和包身份校验的赛季启动票据请求，以及按账户与赛季隔离的本地存档目录准备。目录准备不上传或移动角色，也不切换正在运行的 `DM_SAVE` 挂载。
+
+可显式运行 `reimagined-probe --check-game-token` 检查令牌 API；成功申请后立即请求撤销。当前重编译后的 Mac 临时签名探针读取旧 Keychain 会话时返回 `-25293`，因此没有验证真实游戏令牌或票据请求。探针已禁用本进程的旧 Keychain 对话框，避免无期限等待。此前已验证的 PKCE 登录不代表新增游戏流程已验证。

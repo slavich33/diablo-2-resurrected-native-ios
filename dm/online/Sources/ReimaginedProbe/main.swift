@@ -1,16 +1,40 @@
-// 只读探针：原生读取赛季列表，不创建会话或写入角色。
-// Read-only probe: fetch the ladder schedule natively without creating sessions or writing characters.
+// 默认只读；授权和游戏令牌检查须显式调用，不写角色。
+// Read-only by default; authorization and game-token checks are explicit and never write characters.
 import Foundation
 import ReimaginedClient
+#if os(macOS)
+import Security
+#endif
 
 @main
 struct Probe {
     static func main() async {
+        #if os(macOS)
+        // Process-local only: legacy Keychain reads must fail rather than
+        // waiting indefinitely for UI when this ad-hoc probe is rebuilt.
+        SecKeychainSetUserInteractionAllowed(false)
+        #endif
         do {
             let api = try ReimaginedAPIClient()
             var session: LauncherSession?
             let args = Array(CommandLine.arguments.dropFirst())
-            if args.count == 2, args[0] == "--login-url-file" {
+            if args == ["--check-game-token"] {
+                let store = SessionKeychain()
+                guard var saved = try store.load(origin: api.origin), saved.refreshExpiresAtUtc > Date() else {
+                    fputs("No usable native-client session is available.\n", stderr); exit(1)
+                }
+                if saved.expiresAtUtc <= Date().addingTimeInterval(30) {
+                    saved = try await api.refresh(saved)
+                    try store.save(saved, origin: api.origin)
+                }
+                guard let game = try await api.createGameToken(session: saved) else {
+                    print("Game-token endpoint is unavailable; launcher-token fallback is disabled."); exit(3)
+                }
+                print("Server issued a narrow game-session token. Token value is not logged or persisted.")
+                try await api.revokeGameToken(game)
+                print("Game-token revoke request accepted. No game connection or character write was attempted.")
+                return
+            } else if args.count == 2, args[0] == "--login-url-file" {
                 let login = try LoopbackLogin()
                 let file = URL(fileURLWithPath: args[1])
                 try login.authorization.authorizationURL().absoluteString.write(to: file, atomically: true, encoding: .utf8)
@@ -34,7 +58,7 @@ struct Probe {
                 print("Native-client session revoked and removed. Website sign-in is unchanged.")
                 return
             } else if !args.isEmpty {
-                fputs("Usage: reimagined-probe [--login-url-file PATH | --signed-schedule | --sign-out]\n", stderr)
+                fputs("Usage: reimagined-probe [--login-url-file PATH | --signed-schedule | --check-game-token | --sign-out]\n", stderr)
                 exit(2)
             }
             let schedule = try await api.schedule(accessToken: session?.accessToken)
@@ -44,7 +68,7 @@ struct Probe {
             for entry in schedule.ladders { print("\(entry.name): live=\(entry.isLive), policy=\(entry.policyVersion)") }
             let active = try await api.activeLadders(accessToken: session?.accessToken)
             print("Active ladders: \(active.count)")
-            print("HTTPS API read verified; gameplay transport and server saves are not implemented.")
+            print("HTTPS API read verified; native game admission and server saves remain disconnected.")
         } catch {
             fputs("Reimagined probe failed: \(error)\n", stderr)
             exit(1)
