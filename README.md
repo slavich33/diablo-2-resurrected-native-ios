@@ -1,5 +1,14 @@
 # D2R Mobile
 
+**This fork: native Reimagined integration for iOS/macOS (experimental).**
+Our implementation is in [`dm/online`](dm/online), with the iOS account UI in [`dm/ios/Sources/dm_online.swift`](dm/ios/Sources/dm_online.swift).
+See [our verification status and source-build entry points](docs/REIMAGINED_NATIVE_STATUS.md).
+The native components pass 33 Swift tests and 504 offline official-encoder checks; full ladder gameplay and Server Saves remain unverified.
+
+The original project's description, screenshots and performance figures follow below. Results for this fork's Reimagined integration are recorded in the status document above.
+
+---
+
 **An open-source compatibility layer for Diablo II: Resurrected with the Reign of the Warlock expansion, for iOS, macOS, Android and HarmonyOS.** It brings the Nintendo Switch release you bought, expansion included, to iPhone, iPad and Mac in full: the original game code runs natively, every control is rebuilt for touch, the frame rate holds at 60 fps, and you are in a game one second after the main menu. There is now a native macOS version as well (first version): on an Apple silicon Mac it starts on double-click and works with keyboard, mouse and gamepad. **Since v2.0 there is an Android version** (community port): the same game program executes natively on ARM64 Android phones, with the graphics reimplemented on Vulkan; on a Snapdragon 8+ Gen 1 phone the camp and the Den of Evil and Cow Level fights all run at a median 60 fps (see "Android" below); a HarmonyOS version runs on the same engine (community port: an unsigned shell from the Releases page that you re-sign yourself, nothing to build; see "HarmonyOS"). Apple TV 4K (3rd generation, A15) has a community port (developer preview) that has reached the character-selection screen only on its author's device; see the device table below.
 
 This is not a tech demo that "sort of runs". It is a mobile version polished for daily play, from your first character all the way through the endgame.
