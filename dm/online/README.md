@@ -79,3 +79,7 @@ The independently implemented HTTP contracts were checked against [Reimagined La
 [D2RLoader PluginSDK](https://github.com/D2RLoader/PluginSDK) publishes Windows x64 plugin contracts. The [Installer README](https://github.com/D2RLoader/Installer#readme) explicitly states that the loader core is closed source. The [TCP/IP guide](https://d2rloader.net/tcp-ip.html) describes its independent restoration of TCP/IP multiplayer. Blizzard's [2021 beta FAQ](https://news.blizzard.com/en-us/article/23688836/play-diablo-ii-resurrectedtm-during-the-early-access-open-beta) attributes removal of the original TCP/IP mode to potential security risks; it does not describe those risks in detail.
 
 The raw TCP transport follows the official [D2RLoader TCP/IP guide](https://d2rloader.net/tcp-ip.html) (default TCP port 4000). Token/ticket contracts and save-directory separation were checked against `ReimaginedApiHttpClient`, `GameTokenResponse`, `LadderLaunchTicketResponse` and `LadderSaveDirectoryService` at the launcher commit cited above.
+
+### Offline encoder reference
+
+The control codec now matches 504 bounded offline encoder cases from the pinned official core. 45 selected outputs/rejections are checked by the native Swift tests; see [the partial protocol and reproduction instructions](docs/CONTROL_PROTOCOL.md). These are component checks, not a confirmed ladder/game connection.

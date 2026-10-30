@@ -1,6 +1,6 @@
 # Control payload observations
 
-This is a partial interoperability contract independently derived from static inspection of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. It has not been validated against a live Windows game session or ladder server.
+This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. It has not been validated against a live Windows game session or ladder server.
 
 ## D2RL version 1 control payload
 
@@ -32,4 +32,10 @@ This does not specify the server-to-client carrier, the full mixed game stream, 
 
 ## Verification
 
-Fixed little-endian vectors, malformed-length cases and a full 65536-byte fragment/assembly check are covered by Swift tests. A real loopback TCP peer independently checks the client control vector while exercising bounded buffering and EOF. The separate C/POSIX check verifies the engine-facing C ABI. These checks establish component behavior, not game interoperability.
+The official core's three encoder functions were additionally evaluated on a Mac in an offline Unicorn CPU model: 276 control cases (including all 256 kind values), 216 fragment boundary cases and 12 carrier cases. All 504 results matched the independently implemented layout and acceptance rules. Generic C++ vector allocation/append helpers are substituted with bounded local memory operations; no DLL entry point, Windows OS API, game process or server is involved. This checks encoder behavior only.
+
+45 selected official outputs and rejection cases are retained in `Tests/ReimaginedClientTests/Fixtures/loader-control-reference.json`; the Swift test suite checks native encoding/decoding against them. The corpus records the pinned source-core hash and explicitly marks live interoperability unverified. Original executable bytes are not distributed.
+
+To repeat those 45 checks, install `unicorn==2.1.4` in a separate Python virtual environment and run `python tools/verify_reference_vectors.py --dll /path/to/your/D2RCore.dll` from `dm/online`. The harness rejects other core hashes and uses instruction, memory and copy limits. It exposes no OS imports. This is development tooling; the iOS client remains native Swift/C/ARM64.
+
+Malformed-length cases and a full 65536-byte fragment/assembly check are also covered by Swift tests. A real loopback TCP peer independently checks the client control vector while exercising bounded buffering and EOF. The separate C/POSIX check verifies the engine-facing C ABI. These checks establish component behavior, not game interoperability.
