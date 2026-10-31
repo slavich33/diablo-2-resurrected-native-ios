@@ -59,3 +59,10 @@ Remaining: complete native environment/plugin equivalence and admission,
 verified stock packet framing/sizing, the real engine packet pump, isolated
 server character handling and a confirmed progress/save/reload/reconnect on
 iPhone. No Join button is exposed by this read-only library change.
+
+For a physical-device account-screen check, launch `-mode online` with the
+explicit environment switch `DM_ONLINE_DIAGNOSTICS=1`. The screen writes
+`Documents/online-state.json` (build/native identity, counts and UI state) and
+`online-ui.png`. Capture is suppressed while the authorization browser is
+presented; credentials, account identifiers and HTTP bodies are excluded.
+This opt-in diagnostic does not sign in, join a game or modify saves.

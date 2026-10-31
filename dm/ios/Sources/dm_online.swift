@@ -77,6 +77,41 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if navigationController?.presentingViewController == nil { navigationItem.rightBarButtonItem = nil }
+        recordDiagnostics()
+    }
+
+    /// Explicit device-test switch. Captures only this account screen, never
+    /// the authorization browser, account identifiers, credentials or responses.
+    private func recordDiagnostics() {
+        guard ProcessInfo.processInfo.environment["DM_ONLINE_DIAGNOSTICS"] == "1" else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.isViewLoaded, self.view.window != nil,
+                  self.safari == nil, self.presentedViewController == nil else { return }
+            let target = self.navigationController?.view ?? self.view!
+            target.layoutIfNeeded()
+            let snapshot: [String: Any] = [
+                "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                "nativeUserAgent": self.api.identity.userAgent,
+                "signedIn": self.session != nil,
+                "ladderCount": self.ladders.count, "regionCount": self.regions.count,
+                "status": self.status.text ?? "", "signInEnabled": self.signIn.isEnabled,
+                "width": target.bounds.width, "height": target.bounds.height,
+                "gameAdmissionImplemented": false
+            ]
+            do {
+                let root = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                                       appropriateFor: nil, create: true)
+                let options: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+                let data = try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
+                try data.write(to: root.appendingPathComponent("online-state.json"), options: options)
+                let picture = UIGraphicsImageRenderer(bounds: target.bounds).image { _ in
+                    target.drawHierarchy(in: target.bounds, afterScreenUpdates: true)
+                }
+                if let png = picture.pngData() {
+                    try png.write(to: root.appendingPathComponent("online-ui.png"), options: options)
+                }
+            } catch { /* Diagnostics must not interrupt account or game use. */ }
+        }
     }
 
     @objc private func close() {
@@ -91,6 +126,7 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
         signOut.isEnabled = !value && session != nil
         table.isUserInteractionEnabled = !value
         if value { status.text = onlineText("dmOnlineLoading") }
+        else { recordDiagnostics() }
     }
 
     private func currentSession() async throws -> LauncherSession? {
