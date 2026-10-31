@@ -13,6 +13,7 @@ xcrun --sdk macosx swiftc -sdk "$D2R_ABI_SDK" -parse-as-library -module-name Nat
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/ControlMessage.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/LoaderFrame.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/GamePacketStream.swift" \
+ "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/StockServerPacketLengths.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/GamePacketBridge.swift" \
  "$D2R_ABI_SCRATCH/packets.o" -o "$D2R_ABI_SCRATCH/packets"
 "$D2R_ABI_SCRATCH/packets"

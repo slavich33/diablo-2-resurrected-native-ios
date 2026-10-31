@@ -42,7 +42,16 @@ This does not specify transport-level framing/compression, ordinary gameplay pac
 
 ## Incremental decoding and the native polling boundary
 
-`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. The caller must supply an independently verified engine packet-length resolver. The tests use explicitly synthetic stock packets; no D2R packet-size table is guessed or embedded. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
+`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. Its packet-length resolver must be independently verified. The original callback tests use synthetic stock packets; `StockServerPacketLengths` additionally supplies the 126 fixed packet lengths from the supported ARM64 engine. All 175 descriptors (including 23 variable and 26 invalid entries) independently match the pinned Windows reference. The variable entries remain unsupported; they are not sized from a TCP read or a legacy game's table. System-channel opcodes beginning at `0xaf` are outside this table. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
+
+`dm_online_packets_open_stock_94012()` exposes those fixed sizes without calling guest code. It preserves existing D2RL routing, bounded buffering, short-output retry and terminal errors. It refuses a variable/invalid/system packet before any later carrier can be interpreted; the generic callback entry point remains available for a future complete verified resolver. To recheck the protocol metadata against owned inputs without executing any game function:
+
+```sh
+python dm/online/tools/verify_stock_lengths.py /path/to/original/ExeFS/main \
+  --windows-reference /path/to/pinned-3.3.93847/D2R.exe
+```
+
+The Windows argument is optional and accepts only the independently pinned image hash. The tool pins the complete ARM64 input, compares every Swift descriptor, and rejects mismatches. This proves fixed-length metadata, not variable formats, system routing, transport framing/compression or admission. Tests cover real fixed lengths at every split boundary (including 511/512-byte packets with embedded loader magic), mixed stock/control order, truncated EOF and unsupported packets; the independent C harness also checks the new entry point and retained short-buffer retry.
 
 The decoder preserves order, accepts coalesced reads, caps input storage at 256 KiB and individual packets at 64 KiB, and exposes one packet per poll. A full input buffer rejects the entire append for retry after draining. Unknown packet IDs, invalid lengths and truncated EOF terminate that decoder; it never scans gameplay bytes for the next `D2RL` magic. These caps are local memory policies.
 

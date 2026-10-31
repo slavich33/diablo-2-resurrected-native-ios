@@ -4,7 +4,7 @@ public enum GamePacketStreamError: Error, Equatable {
     case bufferFull, inputEnded, truncatedPacket, invalidLength, unsupportedPacket(UInt8)
 }
 
-/// The original engine must supply the length of ordinary game packets.
+/// An independently verified resolver supplies ordinary game packet lengths.
 /// Returning needMore does not consume input or authorize gameplay.
 public enum GamePacketLength {
     case length(Int)

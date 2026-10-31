@@ -74,6 +74,30 @@ int main(void) {
     assert(dm_online_packets_error(handle) == 3);
     assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3);
     dm_online_packets_release(handle);
-    puts("C packet ABI: callbacks, split input, retained retry, opaque loader routing, ordered drain and truncated EOF passed.");
+    // Exact-build stock entry point needs no guest callback. Exercise the
+    // real 512-byte packet and prove short-output retry preserves every byte.
+    uint8_t stock512[512], stock_out[512];
+    memset(stock512, 0xd0, sizeof(stock512)); stock512[0] = 0x56;
+    handle = dm_online_packets_open_stock_94012(); assert(handle);
+    assert(dm_online_packets_append(handle, stock512, 511) == 0);
+    assert(dm_online_packets_read(handle, stock_out, sizeof(stock_out), &kind) == -1);
+    assert(dm_online_packets_append(handle, stock512 + 511, 1) == 0);
+    assert(dm_online_packets_read(handle, stock_out, 511, &kind) == -5 && kind == 0);
+    assert(dm_online_packets_read(handle, stock_out, sizeof(stock_out), &kind) == 512);
+    assert(kind == 1 && !memcmp(stock512, stock_out, sizeof(stock512)));
+    assert(dm_online_packets_end(handle) == 0);
+    assert(dm_online_packets_read(handle, stock_out, sizeof(stock_out), &kind) == -2);
+    dm_online_packets_release(handle);
+
+    // A real variable packet cannot be sized from its TCP chunk or skipped.
+    const uint8_t variable[] = {0x9c, 0, 3};
+    handle = dm_online_packets_open_stock_94012(); assert(handle);
+    assert(dm_online_packets_append(handle, variable, sizeof(variable)) == 0);
+    assert(dm_online_packets_append(handle, control, sizeof(control)) == 0);
+    assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3 && kind == 0);
+    assert(dm_online_packets_error(handle) == 1);
+    assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3);
+    dm_online_packets_release(handle);
+    puts("C packet ABI: callbacks, verified fixed stock lengths, split input, retained retry, opaque loader routing, ordered drain and truncated EOF passed.");
     return 0;
 }

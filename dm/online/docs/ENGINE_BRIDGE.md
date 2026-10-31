@@ -41,6 +41,8 @@ Build the SDK and required modules with matching source/tool versions. An iPhone
 
 The network side drains outgoing **complete game packets** with `dm_net_remote_read`, and feeds incoming complete packets into system or gameplay channels with `dm_net_remote_feed`. A verified transport codec must perform framing/decompression and channel classification first. Raw TCP reads must not be fed directly. D2RL admission/control handling remains above these queues; feeding a packet does not mark a player admitted.
 
+The Swift packet layer now includes the supported engine's 126 fixed server-game packet lengths and a C entry point that uses them without invoking guest handlers. All 175 descriptors match both exact ARM64 input and an independently pinned Windows reference. The remaining 23 variable formats, system-channel rules and transport codec still need implementation; this partial resolver must not be used to activate a production game pump. See `CONTROL_PROTOCOL.md` and `tools/verify_stock_lengths.py` for reproduction and limits.
+
 Each queue is capped at 256 KiB/1024 packets, with 64 KiB per packet. A short outgoing buffer retains the packet for retry. Overflow is terminal and observable through `dm_net_remote_error`; it does not silently drop commands and continue. Closed bindings remain attached until explicit detach, so an interrupted remote game cannot fall back to local queues. Generation IDs reject late network callbacks from a previous connection.
 
 ## Lifecycle boundary

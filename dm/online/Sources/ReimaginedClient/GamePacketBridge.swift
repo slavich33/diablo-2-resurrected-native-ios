@@ -22,6 +22,8 @@ private final class NativePacketBridge {
         }
     }
 
+    init(decoder: GamePacketStream) { self.decoder = decoder }
+
     func record(_ failure: Error) {
         if let streamError = failure as? GamePacketStreamError {
             switch streamError {
@@ -42,6 +44,15 @@ private final class NativePacketBridge {
 public func nativePacketsOpen(_ resolve: NativePacketLengthResolver?, _ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     guard let resolve else { return nil }
     return Unmanaged.passRetained(NativePacketBridge(resolve: resolve, context: context)).toOpaque()
+}
+
+/// Fixed stock game packets only, after transport decoding. Unknown/variable
+/// packets fail visibly; this does not enable raw TCP, system routing or admission.
+@_cdecl("dm_online_packets_open_stock_94012")
+public func nativeStockPacketsOpen() -> UnsafeMutableRawPointer {
+    Unmanaged.passRetained(NativePacketBridge(
+        decoder: GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+    )).toOpaque()
 }
 
 @_cdecl("dm_online_packets_append")
