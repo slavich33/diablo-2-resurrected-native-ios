@@ -1,6 +1,6 @@
 # Control payload observations
 
-This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. One bounded live ladder refusal now verifies the early uncompressed control-carrier path below; a live Windows session, successful admission and gameplay interoperability remain unverified.
+This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. Two bounded live ladder refusals now verify the early uncompressed control-carrier path below; a live Windows session, successful admission and gameplay interoperability remain unverified.
 
 ## Observed live control refusal
 
@@ -8,7 +8,11 @@ On 31 October 2026 a developer-signed native Mac client renewed its authorized P
 
 This verifies an early bidirectional control exchange and an explicit refusal, not successful environment validation or game admission. It does not establish all gameplay/system wire formats, compression behavior or reconnect/save handling. The response is recorded without endpoint, identity or secrets in `Fixtures/live-incomplete-environment-rejection.json`; it replays through every split boundary with distinct system/control routing.
 
-`AdmissionRejection` separately decodes kind 9 payloads as a code 1..30, three byte lengths 0..63 and the three exact byte fields. Those bounds come from the pinned core's rejection encoder/readers; only code 1 with empty fields is live-verified here. Field semantics and human-readable reason names are not invented. Generic `ControlMessage` remains a framing codec; parsing kind 8 alone still does not establish admission.
+`AdmissionRejection` separately decodes kind 9 payloads as a code 1..30, three byte lengths 0..63 and the three exact byte fields. Those bounds come from the pinned core's rejection encoder/readers; code1 with empty fields and code22 with fields empty/ASCII1/ASCII0 are live-verified here. The pinned original comparison maps code22 to the sidecar-capability word, matching the live server1/client0 result. Other field semantics and reason names remain unassigned. Generic `ControlMessage` remains a framing codec; parsing kind 8 alone still does not establish admission.
+
+A second bounded check used the same verified revision7 package and native identity, and sent the actual 166-byte `EnvironmentDescription.unavailableProfile()` through kind7 (195 carrier bytes). Before sending, its exact output independently matched a manual encoding and passed the complete pinned original D2EM parser/local validator. This description declares no known data fingerprints, no plugins and no sidecar support; it copies no host fingerprints. The server returned29 total bytes, including its greeting and a kind9 refusal with code22 and three fields empty/ASCII1/ASCII0. Static original comparison branches identify this as a sidecar-capability mismatch. No host profile, character, gameplay command or save write was exchanged. The connection closed and narrow-token revocation request was accepted. The identity-free response is `Fixtures/live-unavailable-environment-rejection.json`.
+
+The native required-field representation and its original-parser reference procedure are documented in [ENVIRONMENT_DESCRIPTION.md](ENVIRONMENT_DESCRIPTION.md). A syntactically valid manifest is not a compatible gameplay environment; the missing sidecar behavior must be implemented before it can truthfully be advertised.
 
 ## Shared envelope and opaque messages
 

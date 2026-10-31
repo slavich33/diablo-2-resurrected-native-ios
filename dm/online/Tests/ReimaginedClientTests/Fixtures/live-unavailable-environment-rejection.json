@@ -1,0 +1,9 @@
+{
+  "source": "One bounded real TCP refusal on 2026-10-31 after a native all-unavailable D2EM profile; no endpoint, identity, credentials or character bytes.",
+  "bundleRevision": 7,
+  "responseHex": "af00d018004432524c0109000000000000000000000600160001013130",
+  "controlKind": 9,
+  "rejectionCode": 22,
+  "gameAdmissionVerified": false,
+  "characterBytesSent": 0
+}
