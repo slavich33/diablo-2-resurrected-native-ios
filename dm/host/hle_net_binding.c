@@ -10,6 +10,9 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     uint64_t client, generation, next_generation;
     int failure, active, connect_requested, start_requested;
+    int boot_prepared, boot_applied;
+    char boot_host[24];
+    uint16_t boot_port;
     queue incoming[2], outgoing;
     packet *held[2];
 } state;
@@ -43,6 +46,7 @@ static int current(uint64_t generation) {
 static void fail(int reason) {
     if (!state.failure) state.failure = reason;
     state.active = 0;
+    state.boot_prepared = 0; memset(state.boot_host, 0, sizeof(state.boot_host)); state.boot_port = 0;
     clear(&state.incoming[0]); clear(&state.incoming[1]); clear(&state.outgoing);
     // Borrowed spans are retained until their consumer's next poll. Network
     // close may run concurrently with the engine parsing the previous packet.
@@ -56,7 +60,59 @@ uint64_t dm_net_remote_attach(uint64_t client) {
         if (!++state.next_generation) ++state.next_generation;
         state.client = client; state.generation = state.next_generation; state.failure = 0;
         state.active = state.connect_requested = state.start_requested = 0;
+        state.boot_prepared = state.boot_applied = 0;
+        memset(state.boot_host, 0, sizeof(state.boot_host)); state.boot_port = 0;
         result = state.generation;
+    }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+int dm_net_remote_prepare_start(uint64_t generation, const char *host, uint32_t port) {
+    if (!host || !port || port > 65535) return DM_NET_INVALID;
+    size_t count = strnlen(host, 24);
+    if (!count || count == 24) return DM_NET_INVALID;
+    char copy[24] = {0};
+    for (size_t i = 0; i < count; i++) {
+        unsigned char c = (unsigned char)host[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '-')) return DM_NET_INVALID;
+        copy[i] = (char)c;
+    }
+    pthread_mutex_lock(&lock);
+    int result = current(generation);
+    if (!result && (state.boot_prepared || state.boot_applied || state.start_requested || state.connect_requested)) result = DM_NET_BUSY;
+    if (!result) {
+        memcpy(state.boot_host, copy, sizeof(copy)); state.boot_port = (uint16_t)port;
+        state.boot_prepared = 1;
+    }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+int dm_net_remote_apply_start(uint64_t client, void *startup, uint32_t capacity) {
+    pthread_mutex_lock(&lock);
+    int result = 0;
+    if (state.generation && client == state.client) {
+        result = state.failure;
+        uint32_t original_mode = 0;
+        if (!result) {
+            if (!state.boot_prepared || state.boot_applied || state.start_requested || state.connect_requested ||
+                !startup || capacity < DM_NET_STARTUP_BYTES) {
+                fail(DM_NET_INVALID); result = state.failure;
+            } else {
+                memcpy(&original_mode, (unsigned char *)startup + 0x39, 4);
+                if (original_mode) { fail(DM_NET_INVALID); result = state.failure; }
+            }
+        }
+        if (!result) {
+            unsigned char *bytes = startup;
+            uint32_t remote_mode = 6;
+            memcpy(bytes + 0x21, state.boot_host, sizeof(state.boot_host));
+            memcpy(bytes + 0x39, &remote_mode, 4);
+            memcpy(bytes + 0x9d1, &state.boot_port, 2);
+            state.boot_applied = 1; state.boot_prepared = 0;
+            memset(state.boot_host, 0, sizeof(state.boot_host)); state.boot_port = 0;
+            result = 1;
+        }
     }
     pthread_mutex_unlock(&lock);
     return result;

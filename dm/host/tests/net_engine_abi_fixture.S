@@ -181,3 +181,27 @@ _dm_net_test_start_gate:
 2:  mov x0, #0
 3:  add sp, sp, #0x40
     ret
+
+// Startup gate resumes this displaced STP only on unbound/prepared inputs.
+.p2align 2
+.globl _dm_net_test_bootstrap_gate
+_dm_net_test_bootstrap_gate:
+    NET_TEST_GUARD
+    stp x28, x23, [sp, #-0x40]!
+    b.ne 2f
+    mov x9, #0xaaaa
+    cmp x8, x9
+    b.ne 2f
+    add x0, x0, x1
+    add x0, x0, x2
+    add x0, x0, x3
+    add x0, x0, x4
+    add x0, x0, x5
+    add x0, x0, x6
+    add x0, x0, x7
+    ldr x9, [sp, #0x40]
+    add x0, x0, x9
+    b 3f
+2:  mov x0, #0
+3:  ldp x28, x23, [sp], #0x40
+    ret

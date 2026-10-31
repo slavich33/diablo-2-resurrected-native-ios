@@ -19,17 +19,71 @@ extern uint64_t dm_net_test_connect_gate(uint64_t, uint64_t, uint64_t, uint64_t,
                                          uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 extern uint64_t dm_net_test_start_gate(uint64_t, uint64_t, uint64_t, uint64_t,
                                        uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+extern uint64_t dm_net_test_bootstrap_gate(uint64_t, uint64_t, uint64_t, uint64_t,
+                                           uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 // The connect fixture enters the real assembly gate. Other shims are called
 // directly; a separate game run checks the actual module/metadata dispatcher.
 static int start_gate;
 uint64_t gate_dispatch(uint64_t pc, uint64_t *regs) {
     (void)pc;
-    if (start_gate) svc_net_start_guard(regs); else svc_net_connect_guard(regs);
+    if (start_gate == 2) svc_net_bootstrap_guard(regs, 0x1234);
+    else if (start_gate) svc_net_start_guard(regs); else svc_net_connect_guard(regs);
     return regs[0];
 }
 uint64_t unimpl_c(unsigned index, uint64_t *regs) { (void)index; (void)regs; abort(); }
 void dm_thread_returned(void) { abort(); }
+
+static void bootstrap_tests(void) {
+    unsigned char input[DM_NET_STARTUP_BYTES + 16], before[sizeof(input)];
+    memset(input, 0xa5, sizeof(input)); memset(input + 0x39, 0, 4);
+    memcpy(before, input, sizeof(input));
+    // No binding: the real assembly branch gate resumes the original prologue,
+    // preserving x8, flags and all nine argument positions.
+    start_gate = 2;
+    uint64_t pointer = (uintptr_t)input;
+    assert(dm_net_test_bootstrap_gate(pointer, 1, 2, 3, 4, 5, 6, 7, 8) == pointer + 36);
+    assert(!memcmp(input, before, sizeof(input)));
+    uint64_t g = dm_net_remote_attach(0x1234); assert(g);
+    assert(dm_net_remote_prepare_start(g, "", 4000) == DM_NET_INVALID);
+    assert(dm_net_remote_prepare_start(g, "127.0.0.1", 0) == DM_NET_INVALID);
+    assert(dm_net_remote_prepare_start(g, "127.0.0.1", 65536) == DM_NET_INVALID);
+    assert(dm_net_remote_prepare_start(g, "abcdefghijklmnopqrstuvwx", 4000) == DM_NET_INVALID);
+    assert(dm_net_remote_prepare_start(g, "host/path", 4000) == DM_NET_INVALID);
+    assert(!dm_net_remote_error(g));
+    char host[] = "127.0.0.1";
+    assert(!dm_net_remote_prepare_start(g, host, 49152)); host[0] = '9';
+    assert(dm_net_remote_prepare_start(g, "other", 4000) == DM_NET_BUSY);
+    assert(dm_net_remote_apply_start(0x5678, NULL, 0) == 0);
+    assert(dm_net_test_bootstrap_gate(pointer, 1, 2, 3, 4, 5, 6, 7, 8) == pointer + 36);
+    assert(!strcmp((char *)input + 0x21, "127.0.0.1"));
+    uint32_t mode; uint16_t port;
+    memcpy(&mode, input + 0x39, 4); memcpy(&port, input + 0x9d1, 2);
+    assert(mode == 6 && port == 49152);
+    for (size_t i = 0; i < sizeof(input); i++)
+        if (!(i >= 0x21 && i < 0x3d) && !(i >= 0x9d1 && i < 0x9d3)) assert(input[i] == before[i]);
+    assert(!dm_net_remote_start_requested(g) && !dm_net_remote_connect_requested(g));
+    assert(dm_net_remote_prepare_start(g, "other", 4000) == DM_NET_BUSY);
+    memcpy(before, input, sizeof(input));
+    assert(dm_net_test_bootstrap_gate(pointer, 1, 2, 3, 4, 5, 6, 7, 8) == 0);
+    assert(dm_net_remote_error(g) == DM_NET_INVALID && !memcmp(input, before, sizeof(input)));
+    assert(!dm_net_remote_detach(g));
+    for (int invalid = 0; invalid < 5; invalid++) {
+        memset(input, 0xa5, sizeof(input)); memset(input + 0x39, 0, 4);
+        if (invalid == 2) input[0x39] = 3;
+        memcpy(before, input, sizeof(input));
+        uint64_t next = dm_net_remote_attach(0x1234); assert(next && next != g);
+        assert(dm_net_remote_prepare_start(g, "127.0.0.1", 4000) == DM_NET_STALE);
+        if (invalid != 0) assert(!dm_net_remote_prepare_start(next, "127.0.0.1", 4000));
+        if (invalid == 4) assert(dm_net_remote_start(0x1234));
+        if (invalid == 1) assert(dm_net_remote_apply_start(0x1234, input, DM_NET_STARTUP_BYTES - 1) == DM_NET_INVALID);
+        else if (invalid == 3) assert(dm_net_remote_apply_start(0x1234, NULL, DM_NET_STARTUP_BYTES) == DM_NET_INVALID);
+        else assert(dm_net_test_bootstrap_gate(pointer, 1, 2, 3, 4, 5, 6, 7, 8) == 0);
+        assert(dm_net_remote_error(next) == DM_NET_INVALID && !memcmp(input, before, sizeof(input)));
+        assert(!dm_net_remote_detach(next)); g = next;
+    }
+    start_gate = 0;
+}
 
 int main(int argc, char **argv) {
     assert(argc == 2);
@@ -58,6 +112,7 @@ int main(int argc, char **argv) {
     assert(fgets(line, sizeof(line), trace));
     assert(strstr(line, "\"direction\":\"s2c\"") && strstr(line, "\"length\":4"));
     assert(!fgets(line, sizeof(line), trace)); fclose(trace);
+    bootstrap_tests();
     memset(regs, 0, sizeof(regs));
     regs[0] = 0x1234; regs[1] = (uintptr_t)span;
     svc_net_queue_send(regs, (uintptr_t)dm_net_test_send_body);

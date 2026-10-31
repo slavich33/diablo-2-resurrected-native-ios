@@ -281,10 +281,11 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
     case SVC_HOST_NET_GRACEFUL_CLOSE:
     case SVC_HOST_NET_CONNECT_GUARD:
     case SVC_HOST_NET_START_GUARD:
-    case SVC_HOST_NET_IDLE: {
+    case SVC_HOST_NET_IDLE:
+    case SVC_HOST_NET_BOOTSTRAP: {
         static const uint64_t sites[] = {0x8401c0, 0x840290, 0x840354, 0x841670,
                                          0x841720, 0x83fe64, 0x83fe9c, 0x8404d4,
-                                         0x841568, 0x841740};
+                                         0x841568, 0x841740, 0x2c4dd0};
         const uint64_t site = sites[num - SVC_HOST_NET_QUEUE_SYSTEM];
         // Gate metadata stores a module-relative original site. The saved
         // gate return PC identifies the actual mapped (or embedded) module.
@@ -299,6 +300,7 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
             svc_net_client_status(regs, body, num == SVC_HOST_NET_FAILED);
         else if (num == SVC_HOST_NET_CONNECT_GUARD) svc_net_connect_guard(regs);
         else if (num == SVC_HOST_NET_START_GUARD) svc_net_start_guard(regs);
+        else if (num == SVC_HOST_NET_BOOTSTRAP) svc_net_bootstrap_guard(regs, (uintptr_t)m->base + 0x2d9f438);
         else if (num == SVC_HOST_NET_IDLE) svc_net_client_idle(regs, body);
         else svc_net_client_close(regs, body, num == SVC_HOST_NET_GRACEFUL_CLOSE);
         return 1;

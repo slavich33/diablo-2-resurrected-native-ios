@@ -117,6 +117,13 @@ void svc_net_connect_guard(uint64_t *regs) {
 void svc_net_start_guard(uint64_t *regs) {
     regs[8] = dm_net_remote_start(regs[0]) ? 1 : 0;
 }
+void svc_net_bootstrap_guard(uint64_t *regs, uint64_t client) {
+    int result = dm_net_remote_apply_start(client, (void *)(uintptr_t)regs[0], DM_NET_STARTUP_BYTES);
+    // Success resumes the original startup with its prepared input; a bound
+    // failure returns false before local world/backend initialization.
+    regs[8] = result < 0 ? 1 : 0;
+    if (result < 0) regs[0] = 0;
+}
 void svc_net_client_idle(uint64_t *regs, uint64_t original_body) {
     int can_connect = 0;
     if (dm_net_remote_can_connect(regs[0], &can_connect)) regs[0] = can_connect;

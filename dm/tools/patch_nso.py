@@ -752,7 +752,8 @@ for a in sorted(kinds):
 # template: restore x8/SP/LR on BOTH paths, then either execute the displaced
 # first instruction or return via the original function's standalone ret.
 for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'connect'),
-                                     (0x841568, 0xd10103ff, 0x841614, 0x99, 'start')] if NET_ENGINE_BRIDGE else []):
+                                     (0x841568, 0xd10103ff, 0x841614, 0x99, 'start'),
+                                     (0x2c4dd0, 0xa9bc5ffc, 0x2c50e8, 0x9b, 'bootstrap')] if NET_ENGINE_BRIDGE else []):
     assert struct.unpack_from('<I', IMG, off)[0] == word and off in set(starts)
     assert struct.unpack_from('<I', IMG, tgt)[0] == 0xd65f03c0
     assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)
@@ -767,7 +768,7 @@ for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'c
     gates.append((ret, 'svc', number, off))
     put_branch(off, start); stat('net_' + label + '_guard')
     cuts.append((off, struct.pack('<I', word).hex(), struct.pack('<I', B(off, start)).hex(),
-                 f'net-engine-v3: bound {label} request suppresses original backend; unbound restores all arguments including caller stack', '仅宿主'))
+                 f'net-engine-v4: {label} guard; bootstrap failure returns false before startup, prepared/unbound bootstrap resumes; bound start/connect suppress original backend; caller registers/stack preserved', '仅宿主'))
 
 # 私有视觉分支；非OBS，0x85只读查询。只有本实验构建显式opt-in；原Qty/children和Update不变。
 # Private visual branch; not OBS, 0x85 is a read-only query. Only this experimental build explicitly opts in; the original Qty/children and Update are unchanged.

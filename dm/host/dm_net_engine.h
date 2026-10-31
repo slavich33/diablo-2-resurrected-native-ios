@@ -18,4 +18,5 @@ void svc_net_client_close(uint64_t *regs, uint64_t original_body, int graceful);
 // remain on the original caller's stack. Only x8 is a temporary branch result.
 void svc_net_connect_guard(uint64_t *regs);
 void svc_net_start_guard(uint64_t *regs);
+void svc_net_bootstrap_guard(uint64_t *regs, uint64_t client);
 void svc_net_client_idle(uint64_t *regs, uint64_t original_body);

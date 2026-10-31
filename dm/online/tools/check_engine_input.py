@@ -27,6 +27,7 @@ INDIRECT_ANCHORS = [
 ]
 
 ENTRY_ANCHORS = [
+    ("remote_startup", 0x2c4dd0, "fc5fbca9f65701a9", "bb64e55f32ca2ba1c2cd1d0b9be97886e4d5ea6f549cef200f1c7318f84b8e15"),
     ("system_queue", 0x8401c0, "fd7bbfa9fd030091", "8929a14be30a3d0a57fef86db0f510d78740b487ea1a912421a04fdf2fbd86f0"),
     ("game_queue", 0x840290, "fd7bbfa9fd030091", "2a1d55f8347cdbb2920044bd0807b28725e77ff717b9c246b92833189dd3101c"),
     ("client_send_queue", 0x840354, "f70f1cf8f65701a9", "9b0d731e1b8309a046929d36566cb368e58d0ef03abdc735d211901356a5d3f4"),
