@@ -274,17 +274,33 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
     switch (num) {
     case SVC_HOST_NET_QUEUE_SYSTEM:
     case SVC_HOST_NET_QUEUE_GAME:
-    case SVC_HOST_NET_QUEUE_SEND: {
-        const uint64_t site = num == SVC_HOST_NET_QUEUE_SYSTEM ? 0x8401c0 :
-                              num == SVC_HOST_NET_QUEUE_GAME ? 0x840290 : 0x840354;
+    case SVC_HOST_NET_QUEUE_SEND:
+    case SVC_HOST_NET_CONNECTED:
+    case SVC_HOST_NET_FAILED:
+    case SVC_HOST_NET_HARD_CLOSE:
+    case SVC_HOST_NET_GRACEFUL_CLOSE:
+    case SVC_HOST_NET_CONNECT_GUARD:
+    case SVC_HOST_NET_START_GUARD:
+    case SVC_HOST_NET_IDLE: {
+        static const uint64_t sites[] = {0x8401c0, 0x840290, 0x840354, 0x841670,
+                                         0x841720, 0x83fe64, 0x83fe9c, 0x8404d4,
+                                         0x841568, 0x841740};
+        const uint64_t site = sites[num - SVC_HOST_NET_QUEUE_SYSTEM];
         // Gate metadata stores a module-relative original site. The saved
         // gate return PC identifies the actual mapped (or embedded) module.
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);
         if (!m || strcmp(m->name, "main") || orig_addr != site)
-            die("Unsupported network queue entry gate");
+            die("Unsupported network engine entry gate");
         uint64_t body = (uintptr_t)m->base + site + 8;
         if (num == SVC_HOST_NET_QUEUE_SEND) svc_net_queue_send(regs, body);
-        else svc_net_queue_poll(regs, body, num == SVC_HOST_NET_QUEUE_GAME);
+        else if (num == SVC_HOST_NET_QUEUE_SYSTEM || num == SVC_HOST_NET_QUEUE_GAME)
+            svc_net_queue_poll(regs, body, num == SVC_HOST_NET_QUEUE_GAME);
+        else if (num == SVC_HOST_NET_CONNECTED || num == SVC_HOST_NET_FAILED)
+            svc_net_client_status(regs, body, num == SVC_HOST_NET_FAILED);
+        else if (num == SVC_HOST_NET_CONNECT_GUARD) svc_net_connect_guard(regs);
+        else if (num == SVC_HOST_NET_START_GUARD) svc_net_start_guard(regs);
+        else if (num == SVC_HOST_NET_IDLE) svc_net_client_idle(regs, body);
+        else svc_net_client_close(regs, body, num == SVC_HOST_NET_GRACEFUL_CLOSE);
         return 1;
     }
     case SVC_HOST_NET_CLIENT_SEND: svc_net_client_send(regs); return 1;

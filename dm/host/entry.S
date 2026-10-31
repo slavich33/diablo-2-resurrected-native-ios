@@ -160,3 +160,33 @@ _dm_net_resume_send:
     str x23, [sp, #-64]!
     stp x22, x21, [sp, #16]
     br x16
+
+.p2align 2
+.globl _dm_net_resume_connected
+_dm_net_resume_connected:
+    stp x20, x19, [sp, #-32]!
+    stp x29, x30, [sp, #16]
+    br x16
+
+.p2align 2
+.globl _dm_net_resume_failed
+_dm_net_resume_failed:
+    ldrb w8, [x0, #0x2f0]
+    cbnz w8, 1f
+    // The displaced cbz targets entry+16, not the sequential entry+8.
+    add x16, x16, #8
+1:  br x16
+
+.p2align 2
+.globl _dm_net_resume_hard_close
+_dm_net_resume_hard_close:
+    ldr w8, [x0, #0x14]
+    cmp w8, #1
+    br x16
+
+.p2align 2
+.globl _dm_net_resume_graceful_close
+_dm_net_resume_graceful_close:
+    sub sp, sp, #0x50
+    stp x22, x21, [sp, #0x20]
+    br x16

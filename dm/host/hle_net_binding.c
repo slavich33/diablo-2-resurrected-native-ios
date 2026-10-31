@@ -9,7 +9,7 @@ typedef struct { packet *first, *last; uint32_t bytes, count; } queue;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     uint64_t client, generation, next_generation;
-    int failure;
+    int failure, active, connect_requested, start_requested;
     queue incoming[2], outgoing;
     packet *held[2];
 } state;
@@ -42,6 +42,7 @@ static int current(uint64_t generation) {
 }
 static void fail(int reason) {
     if (!state.failure) state.failure = reason;
+    state.active = 0;
     clear(&state.incoming[0]); clear(&state.incoming[1]); clear(&state.outgoing);
     // Borrowed spans are retained until their consumer's next poll. Network
     // close may run concurrently with the engine parsing the previous packet.
@@ -54,6 +55,7 @@ uint64_t dm_net_remote_attach(uint64_t client) {
     if (!state.generation) {
         if (!++state.next_generation) ++state.next_generation;
         state.client = client; state.generation = state.next_generation; state.failure = 0;
+        state.active = state.connect_requested = state.start_requested = 0;
         result = state.generation;
     }
     pthread_mutex_unlock(&lock);
@@ -87,12 +89,37 @@ int dm_net_remote_error(uint64_t generation) {
     pthread_mutex_lock(&lock); int result = current(generation); pthread_mutex_unlock(&lock);
     return result;
 }
-int dm_net_remote_close(uint64_t generation) {
+int dm_net_remote_activate(uint64_t generation) {
     pthread_mutex_lock(&lock);
     int result = current(generation);
-    if (result != DM_NET_STALE) { fail(DM_NET_CLOSED); result = 0; }
+    if (!result) state.active = 1;
     pthread_mutex_unlock(&lock);
     return result;
+}
+int dm_net_remote_connect_requested(uint64_t generation) {
+    pthread_mutex_lock(&lock);
+    int result = current(generation);
+    if (!result) result = state.connect_requested;
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+int dm_net_remote_start_requested(uint64_t generation) {
+    pthread_mutex_lock(&lock);
+    int result = current(generation);
+    if (!result) result = state.start_requested;
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+int dm_net_remote_fail(uint64_t generation, int reason) {
+    if (reason != DM_NET_CLOSED && reason != DM_NET_INVALID && reason != DM_NET_FULL) return DM_NET_INVALID;
+    pthread_mutex_lock(&lock);
+    int result = current(generation);
+    if (result != DM_NET_STALE) { fail(reason); result = 0; }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+int dm_net_remote_close(uint64_t generation) {
+    return dm_net_remote_fail(generation, DM_NET_CLOSED);
 }
 int dm_net_remote_detach(uint64_t generation) {
     pthread_mutex_lock(&lock);
@@ -115,6 +142,45 @@ int dm_net_remote_send(uint64_t client, const uint64_t *span) {
             if (result) fail(result);
         }
     }
+    pthread_mutex_unlock(&lock);
+    return bound;
+}
+int dm_net_remote_connect(uint64_t client) {
+    pthread_mutex_lock(&lock);
+    int bound = state.generation && client == state.client;
+    // Repeated calls cannot reopen a terminated binding or reset its queues.
+    if (bound && !state.failure) state.connect_requested = 1;
+    pthread_mutex_unlock(&lock);
+    return bound;
+}
+int dm_net_remote_start(uint64_t client) {
+    pthread_mutex_lock(&lock);
+    int bound = state.generation && client == state.client;
+    if (bound && !state.failure) state.start_requested = 1;
+    pthread_mutex_unlock(&lock);
+    return bound;
+}
+int dm_net_remote_can_connect(uint64_t client, int *result) {
+    pthread_mutex_lock(&lock);
+    int bound = state.generation && client == state.client;
+    if (bound && result) *result = !state.failure && !state.connect_requested;
+    pthread_mutex_unlock(&lock);
+    return bound;
+}
+int dm_net_remote_status(uint64_t client, int *connected, int *failed) {
+    pthread_mutex_lock(&lock);
+    int bound = state.generation && client == state.client;
+    if (bound) {
+        if (connected) *connected = !state.failure && state.active && state.connect_requested;
+        if (failed) *failed = !!state.failure;
+    }
+    pthread_mutex_unlock(&lock);
+    return bound;
+}
+int dm_net_remote_disconnect(uint64_t client) {
+    pthread_mutex_lock(&lock);
+    int bound = state.generation && client == state.client;
+    if (bound) fail(DM_NET_CLOSED);
     pthread_mutex_unlock(&lock);
     return bound;
 }

@@ -30,6 +30,13 @@ ENTRY_ANCHORS = [
     ("system_queue", 0x8401c0, "fd7bbfa9fd030091", "8929a14be30a3d0a57fef86db0f510d78740b487ea1a912421a04fdf2fbd86f0"),
     ("game_queue", 0x840290, "fd7bbfa9fd030091", "2a1d55f8347cdbb2920044bd0807b28725e77ff717b9c246b92833189dd3101c"),
     ("client_send_queue", 0x840354, "f70f1cf8f65701a9", "9b0d731e1b8309a046929d36566cb368e58d0ef03abdc735d211901356a5d3f4"),
+    ("client_connected", 0x841670, "f44fbea9fd7b01a9", "e938b7152d433b2104cdb76925ee7bdce176545e55e03b5d568c20cd6822a7d8"),
+    ("client_failed", 0x841720, "08c04b3968000034", "9bd7ca5c532e7c8d1054d4a07c0431cb51e30a410a4ccad2404b8c1354c0737e"),
+    ("client_hard_close", 0x83fe64, "081440b91f050071", "e2638f4918f81062bef994a649c6f767eade610c61cce48b106257bc7ac27029"),
+    ("client_graceful_close", 0x83fe9c, "ff4301d1f65702a9", "768d23b1c7243253ad2b5b9de09f7c57f1b58b17dc33695dc6a9fca66f5a73b5"),
+    ("client_connect", 0x8404d4, "fc6fbaa9fa6701a9", "9ac0d26c24624e30ac75bd8807fac119d6f09d9a6fc5af1d6f3d98a6da2f1c5d"),
+    ("client_start", 0x841568, "ff0301d1f44f02a9", "c47dcf31c248f09a3da02476c1b585df2b69d4ca3c1ef5f8dc3117466ac1147c"),
+    ("client_idle", 0x841740, "081440b91f050071", "734723d8eb82507ea5d7843e8f4ba9b2359747030f8ecfb2afee683a9c5292ec"),
 ]
 
 
@@ -81,7 +88,7 @@ def check(path):
                                   "targetRegister": register, "windowSha256": expected})
     for name, site, prologue, expected in ENTRY_ANCHORS:
         if text[site:site + 8].hex() != prologue or hashlib.sha256(text[site - 16:site + 20]).hexdigest() != expected:
-            raise ValueError("Engine queue-method window does not match")
+            raise ValueError("Engine method window does not match")
         result["anchors"].append({"name": name, "moduleOffset": hex(site), "windowSha256": expected})
     return result
 

@@ -178,12 +178,18 @@ cuts = list(CUTS.get(BUILD_ID, []))
 # Exact-build queue-method bridge. Unbound clients resume the original body,
 # including receive's hidden x8 output. Remote binding is explicit and does
 # not select a remote role, Nintendo login, TCP codec or save synchronization.
-if os.environ.get('DM_NET_ENGINE_BRIDGE') == '1' and NAME == 'main':
+NET_ENGINE_BRIDGE = os.environ.get('DM_NET_ENGINE_BRIDGE') == '1' and NAME == 'main'
+if NET_ENGINE_BRIDGE:
     assert BUILD_ID == RULE_BUILD, 'Unsupported network-engine module'
     cuts.extend([
         (0x8401c0, 'fd7bbfa9fd030091', '211200d4c0035fd6', 'net-engine-v2: system queue method -> svc91; exact prologue resumed by signed native shim', '仅宿主'),
         (0x840290, 'fd7bbfa9fd030091', '411200d4c0035fd6', 'net-engine-v2: gameplay queue method -> svc92; hidden x8 and exact prologue preserved', '仅宿主'),
         (0x840354, 'f70f1cf8f65701a9', '611200d4c0035fd6', 'net-engine-v2: client send method -> svc93; exact prologue resumed by signed native shim', '仅宿主'),
+        (0x841670, 'f44fbea9fd7b01a9', '811200d4c0035fd6', 'net-engine-v3: connected query -> svc94; bound state or exact original prologue', '仅宿主'),
+        (0x841720, '08c04b3968000034', 'a11200d4c0035fd6', 'net-engine-v3: failed query -> svc95; native shim preserves displaced cbz target', '仅宿主'),
+        (0x83fe64, '081440b91f050071', 'c11200d4c0035fd6', 'net-engine-v3: hard close -> svc96; bound failure remains bound', '仅宿主'),
+        (0x83fe9c, 'ff4301d1f65702a9', 'e11200d4c0035fd6', 'net-engine-v3: graceful close -> svc97; unbound original prologue', '仅宿主'),
+        (0x841740, '081440b91f050071', '411300d4c0035fd6', 'net-engine-v3: can-connect query -> svc9a; unbound comparison preserved', '仅宿主'),
     ])
 # 触屏版规则域默认同时带宿主私有门；规则闸门可显式关闭，保留同一出包入口和规则域。
 # The touchscreen rule domain by default also carries the host-private gates; the rule gate check can turn them off explicitly, keeping the same packaging entry point and rule domain.
@@ -740,6 +746,28 @@ for a in sorted(kinds):
     elif k == 'svc': st = site_gate(ins, 'svc', arg); stat(k)
     elif k in ('cntpct', 'cntvct'): st = site_gate(ins, k, arg); stat(k)
     put_branch(a, st)
+
+# Connect has x0..x7 and a ninth stack argument. A C continuation would move
+# the caller's stack and lose it. Use the existing full-register branch-gate
+# template: restore x8/SP/LR on BOTH paths, then either execute the displaced
+# first instruction or return via the original function's standalone ret.
+for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'connect'),
+                                     (0x841568, 0xd10103ff, 0x841614, 0x99, 'start')] if NET_ENGINE_BRIDGE else []):
+    assert struct.unpack_from('<I', IMG, off)[0] == word and off in set(starts)
+    assert struct.unpack_from('<I', IMG, tgt)[0] == 0xd65f03c0
+    assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)
+    start = here()
+    emit(STP_PRE(8, 31, 31, -16))
+    emit(STP_PRE(29, 30, 31, -16))
+    emit_gate_call(); emit(BLR(30))
+    ret = here(); emit(LDP_POST(29, 30, 31, 16))
+    emit(0x34000068)
+    emit(LDP_POST(8, 31, 31, 16)); emit(B(here(), tgt))
+    emit(LDP_POST(8, 31, 31, 16)); emit(word); emit(B(here(), off + 4))
+    gates.append((ret, 'svc', number, off))
+    put_branch(off, start); stat('net_' + label + '_guard')
+    cuts.append((off, struct.pack('<I', word).hex(), struct.pack('<I', B(off, start)).hex(),
+                 f'net-engine-v3: bound {label} request suppresses original backend; unbound restores all arguments including caller stack', '仅宿主'))
 
 # 私有视觉分支；非OBS，0x85只读查询。只有本实验构建显式opt-in；原Qty/children和Update不变。
 # Private visual branch; not OBS, 0x85 is a read-only query. Only this experimental build explicitly opts in; the original Qty/children and Update are unchanged.

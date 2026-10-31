@@ -62,6 +62,10 @@ void svc_net_client_send(uint64_t *regs) {
 
 extern void dm_net_resume_poll(void);
 extern void dm_net_resume_send(void);
+extern void dm_net_resume_connected(void);
+extern void dm_net_resume_failed(void);
+extern void dm_net_resume_hard_close(void);
+extern void dm_net_resume_graceful_close(void);
 
 static void forward_entry(uint64_t *regs, uint64_t body, void (*resume)(void)) {
 #if defined(__aarch64__)
@@ -96,8 +100,32 @@ void svc_net_queue_poll(uint64_t *regs, uint64_t original_body, int gameplay) {
     if (result && result[16]) trace_span(gameplay ? "s2c-game" : "s2c-system", (const uint64_t *)result);
 }
 
+void svc_net_client_status(uint64_t *regs, uint64_t original_body, int failed) {
+    int connected = 0, failure = 0;
+    if (dm_net_remote_status(regs[0], &connected, &failure)) regs[0] = failed ? failure : connected;
+    else forward_entry(regs, original_body, failed ? dm_net_resume_failed : dm_net_resume_connected);
+}
+
+void svc_net_client_close(uint64_t *regs, uint64_t original_body, int graceful) {
+    if (dm_net_remote_disconnect(regs[0])) { regs[0] = 0; return; }
+    forward_entry(regs, original_body, graceful ? dm_net_resume_graceful_close : dm_net_resume_hard_close);
+}
+
+void svc_net_connect_guard(uint64_t *regs) {
+    regs[8] = dm_net_remote_connect(regs[0]) ? 1 : 0;
+}
+void svc_net_start_guard(uint64_t *regs) {
+    regs[8] = dm_net_remote_start(regs[0]) ? 1 : 0;
+}
+void svc_net_client_idle(uint64_t *regs, uint64_t original_body) {
+    int can_connect = 0;
+    if (dm_net_remote_can_connect(regs[0], &can_connect)) regs[0] = can_connect;
+    // Identical displaced instructions to hard close: ldr w8,[x0,#0x14];cmp w8,#1.
+    else forward_entry(regs, original_body, dm_net_resume_hard_close);
+}
+
 void svc_net_client_poll(uint64_t *regs) {
-    // main+0x2cfa5c: blr x9, x0=client, x1=error output,
+    // main+0x2cfa5c: blr x9, x0=client, x1=u64 queue cursor,
     // x8=optional span output {begin,end,present:u8,padding} (24 bytes).
     const unsigned char *result = (const unsigned char *)(uintptr_t)regs[8];
     forward_virtual(regs, regs[9]);

@@ -11,10 +11,23 @@ extern uint64_t dm_net_test_receive(void);
 extern void dm_net_test_receive_body(void);
 extern void dm_net_test_send_body(void);
 extern const unsigned char dm_net_test_packet[4];
+extern void dm_net_test_connected_body(void);
+extern void dm_net_test_failed_body(void);
+extern void dm_net_test_hard_close_body(void);
+extern void dm_net_test_graceful_close_body(void);
+extern uint64_t dm_net_test_connect_gate(uint64_t, uint64_t, uint64_t, uint64_t,
+                                         uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+extern uint64_t dm_net_test_start_gate(uint64_t, uint64_t, uint64_t, uint64_t,
+                                       uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
-// Link-only stubs for the other entry.S symbols. These ABI tests call queue
-// handlers directly; a separate native game run checks actual gate dispatch.
-uint64_t gate_dispatch(uint64_t pc, uint64_t *regs) { (void)pc; (void)regs; abort(); }
+// The connect fixture enters the real assembly gate. Other shims are called
+// directly; a separate game run checks the actual module/metadata dispatcher.
+static int start_gate;
+uint64_t gate_dispatch(uint64_t pc, uint64_t *regs) {
+    (void)pc;
+    if (start_gate) svc_net_start_guard(regs); else svc_net_connect_guard(regs);
+    return regs[0];
+}
 uint64_t unimpl_c(unsigned index, uint64_t *regs) { (void)index; (void)regs; abort(); }
 void dm_thread_returned(void) { abort(); }
 
@@ -58,8 +71,52 @@ int main(int argc, char **argv) {
         assert(received[0] == (uintptr_t)dm_net_test_packet && received[1] - received[0] == 4);
         for (int i = 17; i < 24; i++) assert(result[i] == 0xa5);
     }
+    assert(dm_net_test_connect_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1258);
+    start_gate = 1;
+    assert(dm_net_test_start_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1258);
+    start_gate = 0;
+    _Alignas(8) unsigned char client[0x300] = {0};
+    regs[0] = (uintptr_t)client;
+    svc_net_client_status(regs, (uintptr_t)dm_net_test_connected_body, 0);
+    assert(regs[0] == 7);
+    for (unsigned flag = 0; flag <= 1; flag++) {
+        client[0x2f0] = flag;
+        for (uint32_t mode = 0; mode <= 3; mode++) {
+            memcpy(client + 0x14, &mode, 4);
+            regs[0] = (uintptr_t)client;
+            svc_net_client_status(regs, (uintptr_t)dm_net_test_failed_body, 1);
+            assert(regs[0] == (flag || !mode));
+            regs[0] = (uintptr_t)client;
+            svc_net_client_close(regs, (uintptr_t)dm_net_test_hard_close_body, 0);
+            assert(regs[0] == (mode == 1));
+            regs[0] = (uintptr_t)client;
+            svc_net_client_idle(regs, (uintptr_t)dm_net_test_hard_close_body);
+            assert(regs[0] == (mode == 1));
+        }
+    }
+    regs[0] = (uintptr_t)client;
+    svc_net_client_close(regs, (uintptr_t)dm_net_test_graceful_close_body, 1);
+    assert(regs[0] == 0x42);
     uint64_t generation = dm_net_remote_attach(0x1234);
     assert(generation && !dm_net_remote_attach(0x5678));
+    assert(dm_net_remote_connect_requested(generation) == 0);
+    assert(dm_net_remote_start_requested(generation) == 0);
+    regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 1);
+    start_gate = 1;
+    assert(dm_net_test_start_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1234);
+    assert(dm_net_remote_start_requested(generation) == 1);
+    start_gate = 0;
+    int connected = -1, failed = -1;
+    assert(!dm_net_remote_status(0x5678, &connected, &failed) && connected == -1 && failed == -1);
+    assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
+    assert(!dm_net_remote_activate(generation));
+    assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
+    assert(dm_net_test_connect_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1234);
+    assert(dm_net_remote_connect_requested(generation) == 1);
+    assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
+    regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 0);
+    regs[0] = 0x1234; svc_net_client_status(regs, 0, 0); assert(regs[0] == 1);
+    regs[0] = 0x1234; svc_net_client_status(regs, 0, 1); assert(regs[0] == 0);
     assert(!dm_net_remote_send(0x5678, span));
     memset(regs, 0, sizeof(regs)); regs[0] = 0x1234; regs[1] = (uintptr_t)span;
     // A null continuation would fault if bound traffic fell through locally.
@@ -81,6 +138,13 @@ int main(int argc, char **argv) {
     assert(borrowed[0] == 0x01);
     for (int i = 17; i < 24; i++) assert(result[i] == 0xa5);
     assert(!dm_net_remote_close(generation));
+    assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && failed);
+    regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 0);
+    assert(dm_net_remote_activate(generation) == DM_NET_CLOSED);
+    regs[0] = 0x1234; svc_net_client_status(regs, 0, 0); assert(regs[0] == 0);
+    regs[0] = 0x1234; svc_net_client_status(regs, 0, 1); assert(regs[0] == 1);
+    assert(dm_net_test_connect_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1234);
+    assert(dm_net_remote_error(generation) == DM_NET_CLOSED);
     assert(borrowed[0] == 0x01); // asynchronous close retains a live borrowed span
     regs[0] = 0x1234;
     svc_net_queue_poll(regs, 0, 1);
@@ -91,10 +155,31 @@ int main(int argc, char **argv) {
     assert(!dm_net_remote_detach(generation));
     uint64_t next = dm_net_remote_attach(0x1234); assert(next && next != generation);
     assert(dm_net_remote_feed(generation, DM_NET_SYSTEM, packet, 4) == DM_NET_STALE);
+    assert(dm_net_remote_activate(generation) == DM_NET_STALE);
+    assert(dm_net_remote_fail(generation, DM_NET_INVALID) == DM_NET_STALE);
+    assert(dm_net_remote_connect_requested(next) == 0);
+    assert(dm_net_remote_start_requested(next) == 0);
+    assert(dm_net_remote_start_requested(generation) == DM_NET_STALE);
     for (int i = 0; i < 1024; i++) assert(!dm_net_remote_feed(next, DM_NET_SYSTEM, packet, 1));
     assert(dm_net_remote_feed(next, DM_NET_SYSTEM, packet, 1) == DM_NET_FULL);
     assert(dm_net_remote_error(next) == DM_NET_FULL);
+    assert(!dm_net_remote_close(next) && dm_net_remote_error(next) == DM_NET_FULL);
     assert(!dm_net_remote_detach(next));
-    puts("ARM64 engine shims passed: prologue/hidden x8, remote queue routing, retained retry, span lifetime, stale generation and overflow disconnect.");
+    for (int graceful = 0; graceful <= 1; graceful++) {
+        next = dm_net_remote_attach(0x1234); assert(next);
+        assert(dm_net_remote_connect(0x1234));
+        assert(!dm_net_remote_activate(next));
+        regs[0] = 0x1234; svc_net_client_close(regs, 0, graceful);
+        assert(dm_net_remote_error(next) == DM_NET_CLOSED);
+        assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && failed);
+        assert(!dm_net_remote_detach(next));
+    }
+    next = dm_net_remote_attach(0x1234); assert(next);
+    assert(dm_net_remote_fail(next, DM_NET_EMPTY) == DM_NET_INVALID);
+    assert(!dm_net_remote_error(next));
+    assert(!dm_net_remote_fail(next, DM_NET_INVALID));
+    assert(dm_net_remote_error(next) == DM_NET_INVALID);
+    assert(!dm_net_remote_detach(next));
+    puts("ARM64 engine shims passed: queues, lifecycle/status, no local fallback, start/connect gates with ninth argument, stale generations and overflow disconnect.");
     return 0;
 }
