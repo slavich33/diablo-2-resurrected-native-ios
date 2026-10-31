@@ -36,13 +36,17 @@ The game carrier counts the **entire envelope** in u16. Therefore its maximum pa
 | 16 | 2 | Little-endian payload byte count |
 | 18 | 0..224 | Payload |
 
-The inspected control builder sets offsets 6..15 to zero. Their meaning in other message families is outside this codec. Kind 7 carries environment-manifest fragments in the inspected send path. Kinds 8..10 are bounded and preserved without assigning unverified admission semantics.
+The inspected control builder sets offsets 6..15 to zero. Their meaning in other message families is outside this codec. Kind 7 carries environment-manifest fragments in the inspected send path. Kind8 remains a bounded opaque marker, kind9 has the refusal decoder above and kind10 now has a separately verified character-metadata codec. None grants admission by itself.
 
 ## Environment fragments
 
 The kind-7 payload is `total:u32-le`, `offset:u32-le`, followed by 1..216 bytes. Total is at most 65536; a fragment cannot extend beyond it. The inspected sender emits increasing offsets in chunks of at most 216 bytes.
 
 The Swift ordered assembler is a conservative local policy for one peer/connection. Rejecting overlaps or changed totals does not reproduce the loader's whole receive state machine. Reset on timeout, rejection, disconnect or a new peer. A fully assembled manifest still requires D2EM field/compatibility validation; receiving one never grants admission.
+
+## Character metadata fragments
+
+The inspected original client routes kind10 through the same total/offset/chunk decoder and then its version-7 character-metadata decoder. `CharacterSaveMetadata` and its conservative ordered assembler now implement that body, with1073 synthetic full-original-decoder/sender cases (125 accepted). Zero-filled blob tails have the original sender's canonical trimming. No live kind10 exchange, engine completion hook, sidecar-file support or server-save progress confirmation is inferred; see [CHARACTER_METADATA.md](CHARACTER_METADATA.md).
 
 ## Bidirectional control carrier at the game-packet layer
 
