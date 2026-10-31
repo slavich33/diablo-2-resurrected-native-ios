@@ -59,3 +59,16 @@ registration, journal/provenance API, deletion or offline-character import is
 implemented here. The existing offline save path remains separate.
 
 An independent D2SSharp 0.0.22 reader/writer (the dependency pinned by Reimagined Launcher v0.19.7) round-tripped the two local backup samples, character and shared stash, byte-identically. This held with embedded vanilla tables and with both primary/base text-table datasets extracted and hashed from the signed revision-4 ladder package. This is two-sample offline format evidence, not a server save receipt or a claim about all modded items. The .NET tool is a Mac development reference, not part of the native iOS game.
+
+The [read-only reference tool](../tools/SaveReference) is included as source for
+reproduction on a Mac/desktop with .NET 10. It uses the pinned MIT-licensed
+[D2SSharp](https://github.com/ResurrectedTrader/D2SSharp) package and prints
+anonymous counts/results, without paths, character names, save bytes or writes:
+
+```sh
+dotnet run --project dm/online/tools/SaveReference -- /path/to/own/save-samples
+dotnet run --project dm/online/tools/SaveReference -- /path/to/own/save-samples /path/to/validated/version105/tables
+```
+
+Repeat for each applicable primary/base dataset. The tool does not validate
+bundle signatures or establish live game/server compatibility.

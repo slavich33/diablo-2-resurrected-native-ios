@@ -28,3 +28,5 @@ dm/android/local.env
 
 # Local SwiftPM cache may be a symlink to an external build volume.
 /dm/online/.build
+/dm/online/tools/SaveReference/bin/
+/dm/online/tools/SaveReference/obj/
