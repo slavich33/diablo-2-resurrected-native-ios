@@ -13,6 +13,7 @@ The base project runs the user's own Switch ARM64 game program through native pl
 | Control-payload codec and partial protocol | [`ControlMessage.swift`](../dm/online/Sources/ReimaginedClient/ControlMessage.swift), [`CONTROL_PROTOCOL.md`](../dm/online/docs/CONTROL_PROTOCOL.md) |
 | Incremental game-packet decoder and C polling bridge | [`GamePacketStream.swift`](../dm/online/Sources/ReimaginedClient/GamePacketStream.swift), [`GamePacketBridge.swift`](../dm/online/Sources/ReimaginedClient/GamePacketBridge.swift) |
 | Optional ARM64 client-call instrumentation | [`hle_net_engine.c`](../dm/host/hle_net_engine.c), [`ENGINE_BRIDGE.md`](../dm/online/docs/ENGINE_BRIDGE.md) |
+| Bound client packet FIFOs and connection generations | [`hle_net_binding.c`](../dm/host/hle_net_binding.c), [`dm_net_binding.h`](../dm/host/dm_net_binding.h) |
 | Server-save metadata reader and isolated snapshot staging | [`ServerSaves.swift`](../dm/online/Sources/ReimaginedClient/ServerSaves.swift), [`SERVER_SAVES.md`](../dm/online/docs/SERVER_SAVES.md) |
 | iOS account UI integration | [`dm_online.swift`](../dm/ios/Sources/dm_online.swift) |
 | Native Apple host and iOS app build | [`dm/host`](../dm/host), [`dm/ios`](../dm/ios) |
@@ -21,11 +22,11 @@ The base project runs the user's own Switch ARM64 game program through native pl
 
 Latest native component checks, 31 October 2026:
 
-- 44 Swift tests passed, including real local TCP peers, bounded buffering, EOF, API contracts, reference vectors, mixed game/control streams, refused save reads, snapshot readback, digest failure, version mismatch, path traversal and case collisions.
+- 46 Swift tests passed, including real local TCP peers, bounded buffering, EOF, API contracts, reference vectors, mixed game/control streams, refused save reads, snapshot readback, digest failure, version mismatch, path traversal and case collisions.
 - 576 offline reference cases matched the pinned official D2RLoader core: 276 control cases, 216 fragment cases, 12 carrier cases and 72 client/server control-send-builder cases. 117 reference outputs/rejections are included in the Swift fixtures. The send-builder reference intercepts queue boundaries to collect bytes; the reference tools do not run a Windows game session or a real server queue. See the partial protocol document for reproduction.
 - Independent C callers verified the native TCP round trip against a POSIX peer and the packet ABI's length callback, split input, retained short-buffer retry, ordered drain and truncated EOF. The game-packet bridge is not yet attached to the engine or raw production TCP; ordinary lengths in these checks are synthetic fixtures.
 - The native library and iOS UI bridge compiled for ARM64 iOS. The account UI was separately exercised in a Mac Catalyst harness.
-- The optional client send/receive call shims passed an independent ARM64 assembly ABI test, including receive's hidden `x8` output. The full Mac host and opt-in main/SDK rewrite completed; the current library and shims compiled for ARM64 iOS. An isolated offline Mac run reached the world with a copied save, but did not exercise the remote-client calls. No runtime remote binding is claimed.
+- The queue-method cuts passed independent ARM64 assembly ABI checks and AddressSanitizer/UndefinedBehaviorSanitizer, including hidden `x8`, exact prologue continuation and remote queue failure/lifetime behavior. An isolated native Mac run reached the offline world and traced 327 real packets through the default forwarding path (96 outgoing, 230 incoming gameplay, one system). Remote routing has component-test evidence; no actual ladder binding is claimed.
 - Genuine production browser authorization and authenticated API reads succeeded in a signed native macOS probe. Short-lived game-token issue/revocation succeeded; an independent repeat request with the revoked, unexpired token was rejected with HTTP 401. Session readback also succeeded after a signed probe binary update.
 
 These checks cover components. iPhone account login, live game admission, sustained multiplayer and server-character save/readback remain unverified. Upstream performance measurements in the main README describe the original project.
@@ -38,8 +39,8 @@ With revision 4 validated, the native probe reported its actual version 0.1.0. T
 
 - Transport-level framing/compression, verified ordinary gameplay packet lengths and actual bidirectional gameplay exchange.
 - Verified bindings to the ARM64 engine's client/server roles and packet queues.
-- Complete required environment-manifest/admission semantics and approved native-client compatibility.
-- Accepted Server Saves API reads, download and serializer/layout compatibility, engine save binding, journal/new-character/progress semantics and actual server save/readback confirmation. The read-side decoder is inferred from plugin fields; local staging tests are not server synchronization.
+- Complete required environment-manifest/admission semantics and verified native-client compatibility, including the required plugin behavior.
+- Accepted Server Saves metadata/file reads and serializer/layout compatibility, engine save binding, journal/new-character/progress semantics and actual server save/readback confirmation. The inferred per-file binary GET and digest checks are implemented and fixture-tested; accepted native downloads are unverified. The read-side decoder is inferred from plugin fields; local staging tests are not server synchronization.
 - End-to-end testing against a supported ladder/test environment.
 
 Maintainer discussions: [Reimagined launcher #264](https://github.com/D2R-Reimagined/reimagined-launcher/issues/264), [D2RLoader PluginSDK #5](https://github.com/D2RLoader/PluginSDK/issues/5).

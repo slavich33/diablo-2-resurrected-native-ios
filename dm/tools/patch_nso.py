@@ -175,14 +175,15 @@ if RULE_RUN:
     assert BUILD_ID == RULE_BUILD, f'Run规则构建号不符 {BUILD_ID}'
     RULE_ORIG_SHA = hashlib.sha256(IMG).hexdigest()
 cuts = list(CUTS.get(BUILD_ID, []))
-# Exact-build client packet-pump instrumentation. Default builds are unchanged.
-# Both shims forward the original virtual call, including receive's hidden x8
-# output. This adds no remote role, Nintendo login, TCP attachment or save sync.
+# Exact-build queue-method bridge. Unbound clients resume the original body,
+# including receive's hidden x8 output. Remote binding is explicit and does
+# not select a remote role, Nintendo login, TCP codec or save synchronization.
 if os.environ.get('DM_NET_ENGINE_BRIDGE') == '1' and NAME == 'main':
     assert BUILD_ID == RULE_BUILD, 'Unsupported network-engine module'
     cuts.extend([
-        (0x2cec94, '00013fd6', 'e11100d4', 'net-engine-v1: client send blr x8 -> svc8f; original virtual method forwarded with optional metadata trace', '仅宿主'),
-        (0x2cfa5c, '20013fd6', '011200d4', 'net-engine-v1: client receive blr x9 -> svc90; original virtual method forwarded with hidden x8 result', '仅宿主'),
+        (0x8401c0, 'fd7bbfa9fd030091', '211200d4c0035fd6', 'net-engine-v2: system queue method -> svc91; exact prologue resumed by signed native shim', '仅宿主'),
+        (0x840290, 'fd7bbfa9fd030091', '411200d4c0035fd6', 'net-engine-v2: gameplay queue method -> svc92; hidden x8 and exact prologue preserved', '仅宿主'),
+        (0x840354, 'f70f1cf8f65701a9', '611200d4c0035fd6', 'net-engine-v2: client send method -> svc93; exact prologue resumed by signed native shim', '仅宿主'),
     ])
 # 触屏版规则域默认同时带宿主私有门；规则闸门可显式关闭，保留同一出包入口和规则域。
 # The touchscreen rule domain by default also carries the host-private gates; the rule gate check can turn them off explicitly, keeping the same packaging entry point and rule domain.

@@ -54,7 +54,7 @@ The pause menu's **More → Reimagined Online** entry shares the native tools sh
 
 For an account-screen-only launch, use `-mode online`. That mode does not start the game host. The on-device overlay still needs regeneration and the complete app needs a build before the new pause-menu label is visible. The screen can read available metadata; it does not install a ladder package, obtain admission or modify character saves.
 
-Verification for this integration: 44 library tests pass, including real loopback TCP transfer, refused save reads and isolated snapshot readback. Independent C/POSIX transport and packet checks and an ARM64 assembly engine-call ABI check pass. The current Swift library and engine shims compile for ARM64 iOS; the account UI was separately exercised in a Mac Catalyst harness. These checks do not establish physical-iPhone online behavior or a complete game build.
+Verification for this integration: 46 library tests pass, including real loopback TCP transfer, refused save reads and isolated snapshot readback. Independent C/POSIX transport and packet checks and an ARM64 assembly engine-call ABI check pass. The current Swift library and engine shims compile for ARM64 iOS; the account UI was separately exercised in a Mac Catalyst harness. These checks do not establish physical-iPhone online behavior or a complete game build.
 
 The optional build-time engine-call shims and their exact ABI are documented in [ENGINE_BRIDGE.md](docs/ENGINE_BRIDGE.md). They forward the original client methods; remote role bootstrap and TCP attachment remain unfinished. The inferred Server Saves metadata reader and isolated, digest-checked snapshot preparation are documented in [SERVER_SAVES.md](docs/SERVER_SAVES.md); no live native save round trip is claimed.
 
@@ -67,7 +67,7 @@ The read-only engine-input check validates the original Switch `3.3.94012` NSO m
 ## Remaining integration
 
 1. Rebuild the game overlay and validate the integrated iOS screen on a physical device. The account UI and native components are compiled, but the complete device path has not been exercised.
-2. Integrate signed ladder package validation into the iOS product and establish native-client compatibility with the ladder operators. A private inspection tool validated current revision 4's complete signed package; the native 0.1.0 probe was refused a ticket because the server required launcher 0.19.7 or newer.
+2. Integrate signed ladder package validation into the iOS product and verify the native client against the required ladder contract. A private inspection tool validated current revision 4's complete signed package; the native 0.1.0 probe was refused a ticket because the server required launcher 0.19.7 or newer.
 3. Connect the C transport ABI (`dm/ios/Sources/OnlineTransport.h`) to verified native game-engine callbacks and implement the D2RLoader gameplay environment handshake and packet framing. Public plugin-network interfaces do not provide this implementation.
 4. Bind the prepared save namespace before mounting `DM_SAVE`, then implement native Server Saves behavior, compatible character serialization, conflict handling and confirmed server round trips. Directory preparation is not server synchronization.
 5. Authorized staging tests of join, play, disconnect, reconnect and accepted server-save round trips.

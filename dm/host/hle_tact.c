@@ -270,8 +270,23 @@ __attribute__((weak)) int dm_touch_game_hide_own_glyph(uint64_t widget) { (void)
 // hle_svc.c 的 svc_dispatch 对 0x80 起调这里；0x85保x0。
 // svc_dispatch in hle_svc.c calls here for 0x80 and up; 0x85 preserves x0.
 
-uint64_t svc_host_call(int num, uint64_t *regs) {
+uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
     switch (num) {
+    case SVC_HOST_NET_QUEUE_SYSTEM:
+    case SVC_HOST_NET_QUEUE_GAME:
+    case SVC_HOST_NET_QUEUE_SEND: {
+        const uint64_t site = num == SVC_HOST_NET_QUEUE_SYSTEM ? 0x8401c0 :
+                              num == SVC_HOST_NET_QUEUE_GAME ? 0x840290 : 0x840354;
+        // Gate metadata stores a module-relative original site. The saved
+        // gate return PC identifies the actual mapped (or embedded) module.
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name, "main") || orig_addr != site)
+            die("Unsupported network queue entry gate");
+        uint64_t body = (uintptr_t)m->base + site + 8;
+        if (num == SVC_HOST_NET_QUEUE_SEND) svc_net_queue_send(regs, body);
+        else svc_net_queue_poll(regs, body, num == SVC_HOST_NET_QUEUE_GAME);
+        return 1;
+    }
     case SVC_HOST_NET_CLIENT_SEND: svc_net_client_send(regs); return 1;
     case SVC_HOST_NET_CLIENT_POLL: svc_net_client_poll(regs); return 1;
     case SVC_HOST_PRIVATE_SKILL_AIM: { void svc_private_skill_aim(uint64_t *); svc_private_skill_aim(regs); return 1; }

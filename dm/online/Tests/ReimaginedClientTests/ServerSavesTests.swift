@@ -72,6 +72,34 @@ final class ServerSavesTests: XCTestCase {
         XCTAssertThrowsError(try VerifiedServerSave(metadata: entry, bytes: bytes + Data([0])))
     }
 
+    func testDownloadUsesRawBytesAndRejectsChangedContentWithoutFilesystemWrites() async throws {
+        let ladder = UUID(), transport = Transport(), entry = metadata(name: "Fixture%2F#é.d2s")
+        transport.body = bytes
+        let api = try ReimaginedAPIClient(transport: transport)
+        let token = GameSessionToken(accessToken: "fixture-game", expiresAtUtc: now.addingTimeInterval(60))
+        let ticket = LadderLaunchTicket(launchTicket: "fixture-ticket", expiresAtUtc: now.addingTimeInterval(60),
+            ladderId: ladder, bundleId: UUID(), bundleRevision: 4)
+        let result = try await api.downloadServerSave(entry, ladderID: ladder, gameToken: token, ticket: ticket, now: now)
+        XCTAssertEqual(result.bytes, bytes)
+        let request = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertNil(request.httpBody)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/octet-stream")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-game")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Ladder-Launch-Ticket"), "fixture-ticket")
+        let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.path, "/characters/saves/" + entry.fileName)
+        XCTAssertTrue(components.percentEncodedPath.contains("%252F%23"), "Filename cannot introduce an encoded path separator")
+        XCTAssertEqual(components.queryItems, [URLQueryItem(name: "ladderId", value: ladder.uuidString.lowercased())])
+        transport.body = Data(repeating: 0, count: bytes.count)
+        do { _ = try await api.downloadServerSave(entry, ladderID: ladder, gameToken: token, ticket: ticket, now: now); XCTFail("Changed server bytes accepted") }
+        catch { XCTAssertEqual(error as? ServerSaveError, .digestMismatch) }
+        transport.status = 404
+        do { _ = try await api.downloadServerSave(entry, ladderID: ladder, gameToken: token, ticket: ticket, now: now); XCTFail("Missing file accepted") }
+        catch { XCTAssertEqual(error as? ClientError, .http(404)) }
+        XCTAssertEqual(transport.requests.count, 3)
+    }
+
     func testUntrustedNamesAndCaseCollisionsAreRejectedBeforeFilesystemWrites() throws {
         for name in ["../escape.d2s", "sub/name.d2s", "sub\\name.d2s", "C:save.d2s", ".hidden.d2s", "file.d2s ", "file\n.d2s", "file.txt", "file.d2s/other"] {
             XCTAssertThrowsError(try metadata(name: name).validate(), name)
@@ -81,5 +109,29 @@ final class ServerSavesTests: XCTestCase {
         // Authority is mandatory: do not default an absent/changed field to a
         // mode that would permit uploads. This client contains no upload API.
         XCTAssertThrowsError(try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: Data("{\"files\":[]}".utf8)))
+    }
+
+    func testNativeLayoutPreservesBytesAndRejectsUnsupportedVersionBeforeStaging() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scope = try LadderSaveScope(ladderID: UUID(), accountID: "native-layout-fixture")
+        func file(_ name: String, _ words: [UInt32]) throws -> VerifiedServerSave {
+            var data = Data()
+            for word in words { for shift in stride(from: 0, to: 32, by: 8) { data.append(UInt8(truncatingIfNeeded: word >> shift)) } }
+            let meta = ServerSaveMetadata(fileName: name, characterName: nil,
+                sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                version: 1, byteCount: Int64(data.count), corrupt: false, lastSavedAtUtc: nil)
+            return try VerifiedServerSave(metadata: meta, bytes: data)
+        }
+        let character = try file("Fixture.D2S", [0xaa55aa55, 105, 16, 0])
+        let stash = try file("FixtureStash.d2i", [0xaa55aa55, 2, 105])
+        let manifest = ServerSaveManifest(serverAuthoritative: true, files: [character.metadata, stash.metadata])
+        let staged = try ServerSaveSnapshot.stage([character, stash], manifest: manifest, scope: scope, root: root, layout: .switchVersion105)
+        XCTAssertEqual(try Data(contentsOf: staged.appendingPathComponent("Fixture/Fixture.d2s")), character.bytes)
+        XCTAssertEqual(try Data(contentsOf: staged.appendingPathComponent("FixtureStash/FixtureStash.d2i")), stash.bytes)
+        let wrongVersion = try file("Future.d2s", [0xaa55aa55, 106, 16, 0])
+        let changed = ServerSaveManifest(serverAuthoritative: true, files: [wrongVersion.metadata])
+        XCTAssertThrowsError(try ServerSaveSnapshot.stage([wrongVersion], manifest: changed, scope: scope, root: root, layout: .switchVersion105))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staged.deletingLastPathComponent().path), [staged.lastPathComponent])
     }
 }

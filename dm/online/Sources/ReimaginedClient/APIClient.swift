@@ -87,17 +87,39 @@ public final class ReimaginedAPIClient {
     /// The response schema is statically observed, not live-native verified.
     public func serverSaveManifest(ladderID: UUID, gameToken: GameSessionToken,
                                    ticket: LadderLaunchTicket, now: Date = Date()) async throws -> ServerSaveManifest {
-        guard ticket.ladderId == ladderID else { throw ServerSaveError.wrongLadder }
-        guard gameToken.expiresAtUtc > now, ticket.expiresAtUtc > now,
-              Self.validSecret(gameToken.accessToken), Self.validSecret(ticket.launchTicket) else {
-            throw ServerSaveError.expiredSession
-        }
+        try validateSaveSession(ladderID: ladderID, gameToken: gameToken, ticket: ticket, now: now)
         let (bytes, _) = try await json(path: "characters/saves", token: gameToken.accessToken,
             query: [URLQueryItem(name: "ladderId", value: ladderID.uuidString.lowercased())],
             launchTicket: ticket.launchTicket)
         let manifest = try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: bytes)
         try manifest.validate()
         return manifest
+    }
+
+    /// The inspected plugin downloads raw bytes from this per-file route and
+    /// hashes the response before writing. A changed server version therefore
+    /// fails digest/length verification; it never replaces the prior snapshot.
+    /// The shared HTTP transport's 8 MiB response cap also applies here.
+    public func downloadServerSave(_ metadata: ServerSaveMetadata, ladderID: UUID,
+                                   gameToken: GameSessionToken, ticket: LadderLaunchTicket,
+                                   now: Date = Date()) async throws -> VerifiedServerSave {
+        try validateSaveSession(ladderID: ladderID, gameToken: gameToken, ticket: ticket, now: now)
+        try metadata.validate()
+        guard metadata.byteCount <= 8 * 1024 * 1024 else { throw ServerSaveError.sizeLimit }
+        let (bytes, _) = try await json(path: "characters/saves/" + metadata.fileName,
+            token: gameToken.accessToken,
+            query: [URLQueryItem(name: "ladderId", value: ladderID.uuidString.lowercased())],
+            launchTicket: ticket.launchTicket, accept: "application/octet-stream")
+        return try VerifiedServerSave(metadata: metadata, bytes: bytes)
+    }
+
+    private func validateSaveSession(ladderID: UUID, gameToken: GameSessionToken,
+                                     ticket: LadderLaunchTicket, now: Date) throws {
+        guard ticket.ladderId == ladderID else { throw ServerSaveError.wrongLadder }
+        guard gameToken.expiresAtUtc > now, ticket.expiresAtUtc > now,
+              Self.validSecret(gameToken.accessToken), Self.validSecret(ticket.launchTicket) else {
+            throw ServerSaveError.expiredSession
+        }
     }
 
     /// Transport contract only: a returned ticket does not validate the bundle
@@ -159,14 +181,15 @@ public final class ReimaginedAPIClient {
     }
 
     private func json(path: String, method: String = "GET", body: Data? = nil, token: String? = nil,
-                      query: [URLQueryItem] = [], launchTicket: String? = nil) async throws -> (Data, HTTPURLResponse) {
+                      query: [URLQueryItem] = [], launchTicket: String? = nil,
+                      accept: String = "application/json") async throws -> (Data, HTTPURLResponse) {
         var components = URLComponents(url: origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw ClientError.invalidOrigin }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpMethod = method
         request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("D2RMobile-Reimagined/0.1", forHTTPHeaderField: "User-Agent")
         if let body, !body.isEmpty { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }

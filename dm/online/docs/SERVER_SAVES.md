@@ -22,13 +22,29 @@ On 31 October 2026 a signed native macOS probe, reporting its real version
 admission is claimed. Native compatibility/version negotiation remains to be
 agreed and tested; changing a version string alone is not interoperability.
 
+`downloadServerSave` reads raw bytes from `GET /characters/saves/{fileName}`
+with the ladder query and the same narrow credentials. Static inspection found
+the plugin constructing this route, issuing GET and hashing its response body.
+The native method checks the manifest's exact byte count and SHA-256. A newer
+server version fails verification instead of overwriting an existing snapshot.
+The native HTTP/download limit is 8 MiB per file; the decoder's larger local
+staging limit does not bypass it. Filename percent signs, Unicode and fragment
+characters are escaped as a single path component. The accepted native live
+download remains unverified while ticket compatibility is unresolved.
+
 `VerifiedServerSave` verifies byte count and SHA-256 before staging.
 `ServerSaveSnapshot.stage` commits a complete set into a new isolated account
 and ladder generation, with a same-parent directory rename. A failed or
 incomplete set leaves previous generations and offline saves intact. It does
 not activate a mount. Windows-to-Switch layout and serializer compatibility
-still need independent verification. A download endpoint/response format is
-not guessed by this implementation.
+still need independent verification. Optional `switchVersion105` staging now
+places each unchanged file at `<stem>/<stem>.d2s` or `.d2i`, as required by the
+native host. It checks the save magic and version 105 (and declared character
+file length) before creating any generation. This is a header preflight, not
+an item-stat/quest parser, a checksum validator or a format migration. An
+isolated native Mac run loaded the prepared directory made from local phone
+backup fixtures and reached the world. A genuine Windows/server save round
+trip is still unverified; no server authority mode is inferred from that test.
 
 Local staging accepts only `.d2s`/`.d2i` names without path separators, control
 characters or Windows-reserved path characters. Case and normalized-name
@@ -41,3 +57,5 @@ registration is separate. Which mode is enabled for a particular ladder has
 not been verified by our accepted API read. No upload, new-character
 registration, journal/provenance API, deletion or offline-character import is
 implemented here. The existing offline save path remains separate.
+
+An independent D2SSharp 0.0.22 reader/writer (the dependency pinned by Reimagined Launcher v0.19.7) round-tripped the two local backup samples, character and shared stash, byte-identically. This held with embedded vanilla tables and with both primary/base text-table datasets extracted and hashed from the signed revision-4 ladder package. This is two-sample offline format evidence, not a server save receipt or a claim about all modded items. The .NET tool is a Mac development reference, not part of the native iOS game.

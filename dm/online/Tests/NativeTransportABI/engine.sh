@@ -6,6 +6,8 @@ D2R_ENGINE_TMP="$(mktemp -d "${D2R_ENGINE_TMP_BASE:-${TMPDIR:-/tmp}}/d2r-engine-
 trap 'rm -rf "$D2R_ENGINE_TMP"' EXIT
 xcrun clang -arch arm64 -O1 -Wall -Wextra -Werror \
  "$D2R_ENGINE_ROOT/dm/host/hle_net_engine.c" \
+ "$D2R_ENGINE_ROOT/dm/host/hle_net_binding.c" \
+ "$D2R_ENGINE_ROOT/dm/host/net_engine_entry.S" \
  "$D2R_ENGINE_ROOT/dm/host/tests/t_net_engine_abi.c" \
  "$D2R_ENGINE_ROOT/dm/host/tests/net_engine_abi_fixture.S" \
  -o "$D2R_ENGINE_TMP/probe"

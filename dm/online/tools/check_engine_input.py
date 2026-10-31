@@ -26,6 +26,12 @@ INDIRECT_ANCHORS = [
     ("client_receive", 0x2CFA5C, 9, "873b0242ffee7458d2494faf1d96f7d5c1d2da16c4c7ee3de21007190ded9141"),
 ]
 
+ENTRY_ANCHORS = [
+    ("system_queue", 0x8401c0, "fd7bbfa9fd030091", "8929a14be30a3d0a57fef86db0f510d78740b487ea1a912421a04fdf2fbd86f0"),
+    ("game_queue", 0x840290, "fd7bbfa9fd030091", "2a1d55f8347cdbb2920044bd0807b28725e77ff717b9c246b92833189dd3101c"),
+    ("client_send_queue", 0x840354, "f70f1cf8f65701a9", "9b0d731e1b8309a046929d36566cb368e58d0ef03abdc735d211901356a5d3f4"),
+]
+
 
 def check(path):
     with path.open("rb") as source:
@@ -73,6 +79,10 @@ def check(path):
             raise ValueError("Engine virtual-call window does not match")
         result["anchors"].append({"name": name, "moduleOffset": hex(site),
                                   "targetRegister": register, "windowSha256": expected})
+    for name, site, prologue, expected in ENTRY_ANCHORS:
+        if text[site:site + 8].hex() != prologue or hashlib.sha256(text[site - 16:site + 20]).hexdigest() != expected:
+            raise ValueError("Engine queue-method window does not match")
+        result["anchors"].append({"name": name, "moduleOffset": hex(site), "windowSha256": expected})
     return result
 
 

@@ -1,8 +1,10 @@
 // Native client packet-pump boundary for Switch build 3.3.94012.
-// The optional rewriter cuts preserve the original virtual calls. The receive
+// Unbound queue-entry cuts resume the original methods. Bound clients exchange
+// complete packets through hle_net_binding.c. The receive
 // method has an indirect result in x8; an ordinary C function call loses that
 // argument. Keep it explicitly, as in dm_dropfilter.c's guest-call shim.
 #include "dm_net_engine.h"
+#include "dm_net_binding.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +58,42 @@ void svc_net_client_send(uint64_t *regs) {
     // main+0x2cec94: blr x8, x0=client object, x1={begin,end}.
     trace_span("c2s", (const uint64_t *)(uintptr_t)regs[1]);
     forward_virtual(regs, regs[8]);
+}
+
+extern void dm_net_resume_poll(void);
+extern void dm_net_resume_send(void);
+
+static void forward_entry(uint64_t *regs, uint64_t body, void (*resume)(void)) {
+#if defined(__aarch64__)
+    register uint64_t x0 __asm__("x0") = regs[0];
+    register uint64_t x1 __asm__("x1") = regs[1];
+    register uint64_t x8 __asm__("x8") = regs[8];
+    register uint64_t x16 __asm__("x16") = body;
+    register uint64_t x17 __asm__("x17") = (uintptr_t)resume;
+    __asm__ volatile("blr x17"
+        : "+r"(x0), "+r"(x1), "+r"(x8), "+r"(x16), "+r"(x17)
+        :
+        : "x2", "x3", "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12",
+          "x13", "x14", "x15", "x30",
+          "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
+          "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24",
+          "v25", "v26", "v27", "v28", "v29", "v30", "v31", "cc", "memory");
+    regs[0] = x0;
+#endif
+}
+
+void svc_net_queue_send(uint64_t *regs, uint64_t original_body) {
+    trace_span("c2s", (const uint64_t *)(uintptr_t)regs[1]);
+    if (dm_net_remote_send(regs[0], (const uint64_t *)(uintptr_t)regs[1])) { regs[0] = 0; return; }
+    forward_entry(regs, original_body, dm_net_resume_send);
+}
+
+void svc_net_queue_poll(uint64_t *regs, uint64_t original_body, int gameplay) {
+    const unsigned char *result = (const unsigned char *)(uintptr_t)regs[8];
+    if (dm_net_remote_poll(regs[0], gameplay ? DM_NET_GAMEPLAY : DM_NET_SYSTEM,
+                           (uint64_t *)(uintptr_t)regs[1], (void *)(uintptr_t)regs[8])) regs[0] = 0;
+    else forward_entry(regs, original_body, dm_net_resume_poll);
+    if (result && result[16]) trace_span(gameplay ? "s2c-game" : "s2c-system", (const uint64_t *)result);
 }
 
 void svc_net_client_poll(uint64_t *regs) {

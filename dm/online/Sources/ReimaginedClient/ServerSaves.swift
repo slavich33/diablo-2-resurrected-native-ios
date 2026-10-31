@@ -2,8 +2,10 @@ import Foundation
 import CryptoKit
 
 public enum ServerSaveError: Error, Equatable {
-    case expiredSession, wrongLadder, invalidManifest, invalidFile, sizeLimit, digestMismatch
+    case expiredSession, wrongLadder, invalidManifest, invalidFile, sizeLimit, digestMismatch, unsupportedFormat
 }
+
+public enum ServerSaveLayout { case serverFlat, switchVersion105 }
 
 /// Read-side contract observed in the Server Saves plugin. Live native access
 /// still requires an accepted launch ticket; this is not a local-save importer.
@@ -52,7 +54,7 @@ public struct ServerSaveMetadata: Decodable {
 }
 
 /// A digest-checked download, not proof that a Windows character is compatible
-/// with the Switch engine's serializer. No download endpoint is guessed here.
+/// with the Switch engine's serializer.
 public struct VerifiedServerSave {
     public let metadata: ServerSaveMetadata
     public let bytes: Data
@@ -69,10 +71,12 @@ public struct VerifiedServerSave {
 
 /// Commits an entire server snapshot into a new isolated generation. It never
 /// activates DM_SAVE, modifies an existing generation, or uploads local bytes.
-/// Files retain server names; engine-specific layout/serialization is separate.
+/// Flat staging retains server names. Optional Switch layout changes only paths
+/// after a version/header preflight; item/quest serialization is not migrated.
 public enum ServerSaveSnapshot {
     public static func stage(_ files: [VerifiedServerSave], manifest: ServerSaveManifest,
-                             scope: LadderSaveScope, root: URL) throws -> URL {
+                             scope: LadderSaveScope, root: URL,
+                             layout: ServerSaveLayout = .serverFlat) throws -> URL {
         try manifest.validate()
         guard files.count == manifest.files.count else { throw ServerSaveError.invalidManifest }
         let expected = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.fileName, $0) })
@@ -83,6 +87,7 @@ public enum ServerSaveSnapshot {
                   entry.sha256.lowercased() == file.metadata.sha256.lowercased() else {
                 throw ServerSaveError.invalidManifest
             }
+            _ = try components(file, layout: layout)
         }
         let manager = FileManager.default
         let parent = try scope.prepareDirectory(root: root)
@@ -93,7 +98,14 @@ public enum ServerSaveSnapshot {
         var moved = false
         defer { if !moved { try? manager.removeItem(at: staging) } }
         for file in files {
-            let target = staging.appendingPathComponent(file.metadata.fileName, isDirectory: false)
+            let path = try components(file, layout: layout)
+            var directory = staging
+            for name in path.dropLast() {
+                directory.appendPathComponent(name, isDirectory: true)
+                try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                            attributes: [.posixPermissions: 0o700])
+            }
+            let target = directory.appendingPathComponent(path.last!, isDirectory: false)
             try file.bytes.write(to: target, options: [.withoutOverwriting])
             try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
         }
@@ -101,5 +113,27 @@ public enum ServerSaveSnapshot {
         try manager.moveItem(at: staging, to: committed)
         moved = true
         return committed
+    }
+
+    /// Header/version preflight only, not an item/quest serializer or migration.
+    /// Native host layout is <stem>/<stem>.d2s or .d2i (dm_pages.c).
+    private static func components(_ file: VerifiedServerSave, layout: ServerSaveLayout) throws -> [String] {
+        let name = file.metadata.fileName
+        guard case .switchVersion105 = layout else { return [name] }
+        let ext = (name as NSString).pathExtension.lowercased()
+        let header = Array(file.bytes.prefix(16))
+        func word(_ offset: Int) -> UInt32 {
+            (0..<4).reduce(0) { $0 | UInt32(header[offset + $1]) << ($1 * 8) }
+        }
+        guard header.count >= 12, word(0) == 0xaa55aa55 else { throw ServerSaveError.unsupportedFormat }
+        if ext == "d2s" {
+            guard header.count >= 16, word(4) == 105, word(8) == file.bytes.count else {
+                throw ServerSaveError.unsupportedFormat
+            }
+        } else {
+            guard word(8) == 105 else { throw ServerSaveError.unsupportedFormat }
+        }
+        let stem = (name as NSString).deletingPathExtension
+        return [stem, stem + "." + ext]
     }
 }

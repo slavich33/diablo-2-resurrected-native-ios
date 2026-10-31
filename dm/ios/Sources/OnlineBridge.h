@@ -1,4 +1,5 @@
-// Swift 只读取现有的本地化表；不暴露游戏或存档内存。
-// Swift only reads the existing localization table; no game or save memory is exposed.
+// Native account UI localization and complete-packet engine binding API.
+// Binding does not bootstrap a remote role or grant gameplay admission.
 #pragma once
+#include "../../host/dm_net_binding.h"
 const char *dm_ui(const char *key);
