@@ -66,3 +66,15 @@ explicit environment switch `DM_ONLINE_DIAGNOSTICS=1`. The screen writes
 `online-ui.png`. Capture is suppressed while the authorization browser is
 presented; credentials, account identifiers and HTTP bodies are excluded.
 This opt-in diagnostic does not sign in, join a game or modify saves.
+
+The diagnostic was exercised on a physical iPhone on 31 October 2026, after a
+complete development app update. Device-side metadata and the captured account
+screen identified build `1793469345` (code commit `c4cef3d`), the actual native
+iOS User-Agent and one live ladder. The user was signed out. The same build's
+original game character-selection scene also rendered on-device, including the
+existing character. A save read independently before and after installation was
+byte-identical. Shader libraries matched the existing local renderer chain;
+the development package used the repository's free-team packaging variant.
+Original game resources, generated libraries, signed apps, private identities
+and device captures are not published here. This is a startup/UI verification,
+not a world-performance, authenticated-login or playable-ladder result.
