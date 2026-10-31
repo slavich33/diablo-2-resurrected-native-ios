@@ -1,4 +1,4 @@
-# Required D2EM description
+# D2EM environment description
 
 `EnvironmentDescription` implements required fields1..6 of the D2EM-v3 envelope. The contract was independently checked against the pinned official D2RLoader 1.3.1-beta core, SHA256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. A fresh official archive download on 31 October 2026 contained that same core. No original executable bytes or game data are distributed.
 
@@ -13,27 +13,46 @@ All multibyte integers are little-endian. Coverage is complete1, partial2 or una
 |5|literal count3:u8, then tag:u8, policyVersion:u16, coverage:u8, valueLength:u8=0/8, optional value:u64 in tag order1..3|
 |6|count:u16<=256, then tag:u8, flags:u8, nameLength:u16<=1024, name bytes, digest32|
 
-Contract version/word8/word10 and policy versions must be nonzero. Sidecar capability is0/1, with format0 exactly when capability0. Names, record flags, the two opaque contract words and optional-field semantics are not inferred from these structural checks. The corpus below deliberately has an empty named inventory; full named-record validity and ordering are not established.
+Contract version/word8/word10 and policy versions must be nonzero. Sidecar capability is0/1, with format0 exactly when capability0. Field6 names/flags and the two opaque contract words are not given unverified gameplay meanings. The required-field corpus deliberately has an empty named inventory; its full validity and ordering are not established.
 
 A rollup's unavailable state requires count0/no digest; partial requires a positive count/digest. A complete group may be empty without a digest. The aggregate count equals the sum of all seven groups without u32 overflow. Its coverage is complete if all groups are complete, otherwise unavailable when the total is0, otherwise partial. A complete aggregate must contain at least one component. Bank/schema availability similarly requires its digest/value. These are known local consistency rules, not proof that hashes represent actual game resources.
 
 `unavailableProfile()` produces166 bytes and advertises no known fingerprints, banks, schemas, named records, plugins or sidecar capability. Contract words2/0/0/4/7 and policy versions4/4/2 match independently addressed original decoder defaults. Native struct layout has padding and is not the packed wire layout. The actual Swift output SHA256 is `93e5cb7b60a0dde292f70ad16fcec2fd9f4957440282f14647d66bc6330cea33`; it matched independent encoding and the full original parser/local validator. It remains an unsupported gameplay profile.
 
+## Optional metadata and sidecar projection
+
+`EnvironmentMetadata` implements known optional fields16..18, which must not carry the required flag. Each text has a u16 byte length<=1024. The environment codec preserves raw byte strings; it does not silently convert invalid UTF8 or embedded NUL into a different identity.
+
+| Field | Payload |
+| --- | --- |
+|16|two texts|
+|17|four texts, opaque word:u32, flag:u8=0/1; first text must be nonempty|
+|18|count:u16<=256, then four texts, role:u8=1/2, scope:u8=1/2/3, two opaque u32 words, digestLength:u8=0/32 and digest|
+
+A plugin's first and fourth texts must be nonempty. Identity is the pair role/first-text, irrespective of scope. The full original parser requires records already in ascending role and unsigned lexicographic first-text order; duplicate identities and noncanonical order are rejected. Absence of a field remains distinct from an explicitly empty record. Unknown optional fields remain unchanged in `EnvironmentDescription.optionalFields`.
+
+`CharacterSidecar(fixedFields:environmentMetadata:clientPlugins:stats:)` projects the two root texts, inserts an empty third text into the mod's five-text sidecar record and copies its word/boolean into word/scope. It uses only environment plugins with scope2/3, then appends the caller's explicitly supplied actual client scope1 records. Host scope1 plugins are never relabeled as client counterparts. The mod-present word is set before the existing sidecar validator checks all text, record-count and duplicate constraints. Sidecar UTF8/NUL/required-text rules are stricter than the environment's byte-string rules; an unsupported projection throws instead of losing information. Apply projection before history/signing.
+
+This mapping follows the pinned original D2S completion wrapper; the whole Windows filesystem wrapper was not executed. The native projection tests cover scope separation, mod/text placement, absent fields, codec round trip, own-key signing and stricter-text refusal. This API does not authenticate a host profile, obtain native fingerprints, select a server namespace, commit files or upload progress. The production completion receiver/coordinator remains disconnected and capability remains0.
+
 ## Reproduce
 
 `Fixtures/required-environment-reference.json` contains276 synthetic cases with24 accepted by the complete original parser and local validator. It covers all required-field truncations, missing/trailing fields, sidecar contradictions, aggregate/group coverage and counts, policies, canonical tags and bank/schema lengths. The Swift test suite replays every case without any original binary. Accepted canonical envelopes also re-encode byte-exactly.
+
+`Fixtures/environment-metadata-reference.json` additionally checks the complete original parser/local validator on232 synthetic cases, with84 accepted, including decoded native-model bytes, all short-record truncations, text limits/raw bytes, flags, role/scope, digests, duplicate identities and canonical ordering. Native Swift must match acceptance, decoded fields and exact re-encoding for every accepted input. No original model or game bytes are shipped.
 
 For an independent original-code reference, use your own exact core and a separate development Python environment with Unicorn 2.1.4:
 
 ```sh
 python dm/online/tools/verify_environment_description.py --dll /path/to/your/D2RCore.dll
+python dm/online/tools/verify_environment_metadata.py --dll /path/to/your/D2RCore.dll
 xcrun --sdk macosx swiftc -parse-as-library -O -module-name RequiredEnvironmentCheck \
-  dm/online/Sources/ReimaginedClient/{EnvironmentEnvelope,EnvironmentDescription}.swift \
+  dm/online/Sources/ReimaginedClient/{EnvironmentEnvelope,EnvironmentDescription,EnvironmentMetadata}.swift \
   dm/online/tools/verify_environment_description.swift -o /private/scratch/verify-environment
 /private/scratch/verify-environment dm/online/Tests/ReimaginedClientTests/Fixtures/required-environment-reference.json
 ```
 
-The reference pins the whole core, bounds instructions/memory/copies and substitutes only private-arena allocation/copy/free. It executes no DLL entry point, OS API, game or network operation. It requires Python assertions enabled. A new synthetic corpus may be written with `--output` to a previously nonexistent path; existing files are never overwritten. The shipped iOS code uses native Swift/C/ARM64, not this development reference.
+The reference pins the whole core, bounds instructions/memory/copies and substitutes only private-arena allocation/copy/free/memcmp. It executes no DLL entry point, OS API, game or network operation. It requires Python assertions enabled. A new synthetic corpus may be written with `--output` to a previously nonexistent path; existing files are never overwritten. The shipped iOS code uses native Swift/C/ARM64, not this development reference.
 
 ## Live boundary
 

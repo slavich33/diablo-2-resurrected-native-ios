@@ -91,8 +91,8 @@ public struct EnvironmentNamedFingerprint: Equatable {
 
 /// Typed required D2EM-v3 fields and known local consistency checks. Neither
 /// decoding a host profile nor constructing one grants compatibility/admission.
-/// Named-record/optional-field semantics and actual native fingerprints are
-/// deliberately separate from these bounds and rollup checks.
+/// Named-record semantics and actual native fingerprints are separate from
+/// these bounds and rollup checks. Known optional metadata is also validated.
 public struct EnvironmentDescription {
     public let contract: EnvironmentContract
     public let aggregate: FingerprintRollup
@@ -101,6 +101,7 @@ public struct EnvironmentDescription {
     public let itemStatSchemas: [EnvironmentItemStatSchema]
     public let namedFingerprints: [EnvironmentNamedFingerprint]
     public let optionalFields: [EnvironmentField]
+    public let metadata: EnvironmentMetadata
 
     public init(contract: EnvironmentContract, aggregate: FingerprintRollup,
                 groups: [EnvironmentFingerprintGroup], banks: [EnvironmentBank],
@@ -120,6 +121,7 @@ public struct EnvironmentDescription {
         }
         self.contract = contract; self.aggregate = aggregate; self.groups = groups; self.banks = banks
         self.itemStatSchemas = itemStatSchemas; self.namedFingerprints = namedFingerprints; self.optionalFields = optionalFields
+        self.metadata = try EnvironmentMetadata.decode(optionalFields)
         _ = try envelope() // Also enforce duplicate IDs, total size and outer flag rules.
     }
 
