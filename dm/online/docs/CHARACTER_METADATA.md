@@ -18,7 +18,7 @@ All multibyte values are little-endian. Names and opaque blobs remain bytes; dec
 |flag70|u8=0/1|
 |blob71, blob1071|each u16 count<=4096, then bytes|
 
-The opaque field names retain original model offsets, not wire offsets. If word58 is 0, word50/word60/word68 must all be 0. Otherwise word50 and word60 must be positive and word68>=word60. The parser consumes the whole body; total size is 77..8329 bytes. These checks do not infer the meaning or provenance of the opaque values.
+The unassigned word names retain original model offsets, not wire offsets. The two blob names also retain those offsets for compatibility; their bits are now independently identified as item stat IDs first, player stat IDs second. [CHARACTER_STAT_USAGE.md](CHARACTER_STAT_USAGE.md) describes native decoding and descriptor reconstruction. If word58 is 0, word50/word60/word68 must all be 0. Otherwise word50 and word60 must be positive and word68>=word60. The parser consumes the whole body; total size is 77..8329 bytes. These checks do not infer the meaning or provenance of the opaque values.
 
 The original receiver zero-fills each fixed 4096-byte blob; its sender strips trailing zeros. Native construction/decoding uses that same canonical representation. Accepted noncanonical input may therefore re-encode shorter, which the reference corpus checks against the original sender rather than expecting a naive byte-identical input round trip.
 

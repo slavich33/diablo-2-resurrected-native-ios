@@ -8,8 +8,9 @@ public enum CharacterSaveMetadataError: Error, Equatable {
 }
 
 /// The version-7 metadata body carried by D2RL kind10. The four contract words,
-/// flag and two fixed-capacity blobs remain opaque; structural validity does
-/// not establish their provenance, a valid seal, sidecar support or admission.
+/// flag remain opaque. The two fixed-capacity blobs contain item/player stat
+/// usage bitmaps (see statUsage). Structural validity does not establish their
+/// completeness, provenance, a valid seal, sidecar support or admission.
 public struct CharacterSaveMetadata: Equatable {
     public static let maximumBlobBytes = 4096
     public static let maximumBytes = 76 + 61 + 2 * maximumBlobBytes
