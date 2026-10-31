@@ -4,13 +4,14 @@ import XCTest
 final class NewCharacterHeaderTests: XCTestCase {
     /// Synthetic layout-only bytes. No original character or game data.
     private func fixture(name: String = "Fixture", flags: UInt32 = 1,
-                         level: UInt8 = 1, version: UInt32 = 105) -> Data {
+                         level: UInt8 = 1, version: UInt32 = 105,
+                         edition: UInt8 = 3, characterClass: UInt8 = 4) -> Data {
         var bytes = [UInt8](repeating: 0, count: 403)
         func word(_ offset: Int, _ value: UInt32) {
             for i in 0..<4 { bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (i * 8)) }
         }
         word(0, 0xaa55aa55); word(4, version); word(8, 403); word(20, flags)
-        bytes[24] = 4; bytes[25] = 16; bytes[26] = 30; bytes[27] = level
+        bytes[24] = characterClass; bytes[25] = 16; bytes[26] = 30; bytes[27] = level; bytes[248] = edition
         for (i, byte) in name.utf8.enumerated() { bytes[299 + i] = byte }
         var checksum: UInt32 = 0
         for byte in bytes { checksum = ((checksum << 1) | (checksum >> 31)) &+ UInt32(byte) }
@@ -37,7 +38,9 @@ final class NewCharacterHeaderTests: XCTestCase {
     func testRejectsProgressOldFormatAndCorruption() {
         for bytes in [fixture(flags: 0x20), fixture(flags: 9), fixture(flags: 0x101),
                       fixture(flags: 3), fixture(flags: 0x41), fixture(level: 2),
-                      fixture(version: 104), fixture() + Data([0]), Data(fixture().dropLast())] {
+                      fixture(version: 104), fixture(edition: 0), fixture(edition: 4),
+                      fixture(edition: 1, characterClass: 5), fixture(edition: 2, characterClass: 7),
+                      fixture() + Data([0]), Data(fixture().dropLast())] {
             XCTAssertThrowsError(try NewCharacterHeader(characterName: "Fixture", bytes: bytes)) {
                 XCTAssertEqual($0 as? NewCharacterError, .unsupportedHeader)
             }

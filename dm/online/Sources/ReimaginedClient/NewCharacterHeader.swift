@@ -29,7 +29,8 @@ public struct NewCharacterHeader {
         let flags = word(20)
         guard word(0) == 0xaa55aa55, word(4) == 105, word(8) == 403,
               flags & 1 == 1, flags & ~UInt32(0x25) == 0,
-              data[24] <= 7, data[25] == 16, data[26] == 30, data[27] == 1,
+              (1...3).contains(data[248]), data[24] < (data[248] == 1 ? 5 : data[248] == 2 ? 7 : 8),
+              data[25] == 16, data[26] == 30, data[27] == 1,
               Array(data[299..<(299 + name.count)]) == name,
               data[(299 + name.count)..<395].allSatisfy({ $0 == 0 }) else {
             throw NewCharacterError.unsupportedHeader

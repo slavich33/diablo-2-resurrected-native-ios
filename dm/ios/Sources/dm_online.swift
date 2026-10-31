@@ -12,10 +12,14 @@ private final class OnlineDiagnosticTransport: HTTPTransport {
     private let base = SessionTransport()
     private let lock = NSLock()
     private var observations: [[String: Any]] = []
+    private var registrationReplies: [[String: Any]] = []
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let result = try await base.send(request)
         if ProcessInfo.processInfo.environment["DM_ONLINE_PACKAGE_DIAGNOSTICS"] == "1" {
             record(request.url?.path ?? "", status: result.1.statusCode)
+        }
+        if ProcessInfo.processInfo.environment["DM_ONLINE_REGISTER_DIAGNOSTICS"] == "1" {
+            recordRegistration(request.url?.path ?? "", body: result.0, status: result.1.statusCode)
         }
         return result
     }
@@ -24,7 +28,7 @@ private final class OnlineDiagnosticTransport: HTTPTransport {
                       ("/game-token/revoke", "game-token-revoke"), ("/characters/saves", "save-list"),
                       ("/v2/games", "game-list"), ("/client-policy", "policy"),
                       ("/ladders/schedule", "schedule"), ("/auth/launcher/refresh", "refresh"),
-                      ("/auth/launcher/token", "authorization")]
+                      ("/auth/launcher/token", "authorization"), ("/characters/saves/snapshot", "new-character")]
         guard let route = routes.first(where: { path.hasSuffix($0.0) })?.1 else { return }
         lock.lock()
         observations.append(["route": route, "httpStatus": status])
@@ -35,6 +39,32 @@ private final class OnlineDiagnosticTransport: HTTPTransport {
         guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
               let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else { return }
         try? data.write(to: root.appendingPathComponent("online-http-state.json"),
+                        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+    private func recordRegistration(_ path: String, body: Data, status: Int) {
+        let route: String
+        if path.hasSuffix("/characters/saves/snapshot") { route = "submit" }
+        else if path.contains("/characters/saves/snapshot/receipts/") { route = "receipt" }
+        else if path.hasSuffix("/characters/saves") { route = "manifest" }
+        else { return }
+        guard body.count <= 65_536, let object = try? JSONSerialization.jsonObject(with: body) else { return }
+        func shape(_ object: Any) -> Any {
+            if let value = object as? [String: Any] { return value.mapValues(shape) }
+            if let value = object as? [Any] { return ["count": value.count, "sample": value.first.map(shape) ?? NSNull()] }
+            if object is NSNull { return NSNull() }
+            if object is NSNumber { return "number-or-boolean" }
+            return "string"
+        }
+        var observation: [String: Any] = ["route": route, "httpStatus": status, "shape": shape(object)]
+        if let root = object as? [String: Any], let code = root["code"] as? String, code.utf8.count <= 128,
+           code.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }) {
+            observation["code"] = code
+        }
+        lock.lock(); registrationReplies.append(observation); registrationReplies = Array(registrationReplies.suffix(16))
+        let snapshot = registrationReplies; lock.unlock()
+        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+              let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else { return }
+        try? data.write(to: root.appendingPathComponent("online-registration-replies.json"),
                         options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
@@ -246,6 +276,37 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
             report["lobbyRooms"] = result.lobby.games.count
             report["lobbyPlayers"] = result.lobby.totalPlayers
             report["narrowTokenRevocationAccepted"] = true
+            if ProcessInfo.processInfo.environment["DM_ONLINE_REGISTER_DIAGNOSTICS"] == "1" {
+                stage = "new-character-registration"; saveReport()
+                let inputURL = root.appendingPathComponent("ReimaginedRegistration/input.json")
+                struct Input: Decodable { let characterName: String; let expectedSHA256: String }
+                let input = try JSONDecoder().decode(Input.self, from: Data(contentsOf: inputURL))
+                guard (2...15).contains(input.characterName.utf8.count), input.characterName.utf8.allSatisfy({
+                    (65...90).contains($0) || (97...122).contains($0)
+                }) else { throw NewCharacterError.invalidName }
+                // Dedicated original-engine test creation only; never scans or
+                // selects from the player's Documents/save directory.
+                let name = input.characterName
+                let source = root.appendingPathComponent("phase18-native-registration/save/\(name)/\(name).d2s")
+                let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
+                guard attributes[.type] as? FileAttributeType == .typeRegular,
+                      (attributes[.size] as? NSNumber)?.intValue == 403 else { throw NewCharacterError.unsupportedHeader }
+                let header = try NewCharacterHeader(characterName: name, bytes: Data(contentsOf: source))
+                guard header.sha256 == input.expectedSHA256.lowercased() else { throw NewCharacterError.checksumMismatch }
+                let registered = try await api.registerNewCharacter(header: header, bundle: current, package: verified,
+                    session: credentials, root: root)
+                report["initialCharacterRegistered"] = true
+                report["serverSaveFilesBeforeRegistration"] = result.saves.files.count
+                report["serverSaveFiles"] = registered.snapshotFileCount
+                report["initialCharacterBytes"] = registered.initialCharacter.bytes.count
+                report["initialCharacterGameEdition"] = header.bytes[248]
+                report["serverCharacterVersion"] = registered.initialCharacter.metadata.version
+                report["initialCharacterExactReadback"] = registered.initialCharacter.bytes == header.bytes
+                report["isolatedSnapshotPrepared"] = true
+                report["snapshotFileCount"] = registered.snapshotFileCount
+                report["characterWritten"] = true
+                report["registrationTokenRevocationAccepted"] = true
+            }
             stage = "complete"; saveReport()
         } catch {
             // A narrow-token/ticket refusal must not remove the launcher's
@@ -253,6 +314,8 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
             report["failed"] = true
             if case ClientError.http(let code) = error { report["httpStatus"] = code }
             else { report["errorType"] = String(reflecting: type(of: error)) }
+            if let failure = error as? RegistrationError { report["registrationError"] = String(describing: failure) }
+            if case DecodingError.keyNotFound(let key, _) = error { report["missingField"] = key.stringValue }
             saveReport()
         }
     }

@@ -161,6 +161,34 @@ public final class ReimaginedAPIClient {
         }
     }
 
+    /// First attempt only. The journal is durably marked before sending; a
+    /// timeout/refusal is never retried with this method or a new operation ID.
+    public func submitNewCharacter(_ journal: NewCharacterJournal, package: VerifiedLadderPackage,
+                                   gameToken: GameSessionToken, ticket: LadderLaunchTicket,
+                                   now: Date = Date()) async throws -> Data {
+        try validateSaveSession(ladderID: journal.ladderID, gameToken: gameToken, ticket: ticket, now: now)
+        guard ticket.bundleId == package.bundleID, ticket.bundleRevision == package.revision else { throw ClientError.policyChanged }
+        try journal.beginAttempt(package: package)
+        let (bytes, _) = try await json(path: "characters/saves/snapshot", method: "POST", body: journal.requestBody,
+            token: gameToken.accessToken, query: [URLQueryItem(name: "ladderId", value: journal.ladderID.uuidString.lowercased())],
+            launchTicket: ticket.launchTicket)
+        try journal.rememberPost(bytes)
+        return bytes
+    }
+
+    /// Read reconciliation only, including after an uncertain POST. A 404 is
+    /// not permission to resubmit an attempted operation.
+    public func newCharacterReceipt(_ journal: NewCharacterJournal, gameToken: GameSessionToken,
+                                    ticket: LadderLaunchTicket, now: Date = Date()) async throws -> Data? {
+        try validateSaveSession(ladderID: journal.ladderID, gameToken: gameToken, ticket: ticket, now: now)
+        do {
+            let (bytes, _) = try await json(path: "characters/saves/snapshot/receipts/" + journal.operationID.uuidString.lowercased(),
+                token: gameToken.accessToken, query: [URLQueryItem(name: "ladderId", value: journal.ladderID.uuidString.lowercased())],
+                launchTicket: ticket.launchTicket)
+            return bytes
+        } catch ClientError.http(404) { return nil }
+    }
+
     /// Transport contract only: a returned ticket does not validate the bundle
     /// or admit the native engine. Call only after complete bundle validation.
     public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor,

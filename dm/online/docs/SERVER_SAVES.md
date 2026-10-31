@@ -78,9 +78,41 @@ The inspected plugin supports a server-authoritative mode in which the game
 server saves progress and local edits are not uploaded; new-character
 registration is separate. The accepted revision-5 account list reported
 `serverAuthoritative=true`; that does not authorize importing existing offline
-characters or establish the write/registration contract. No upload, new-character
-registration, journal/provenance API, deletion or offline-character import is
-implemented here. The existing offline save path remains separate.
+characters or establish the write/registration contract. No general progress
+upload, provenance API, deletion or offline-character import is implemented
+here. The existing offline save path remains separate.
+
+## Fresh-character registration
+
+`NewCharacterJournal` records one fresh engine-created header, exact request
+bytes and a UUID operation in an account/ladder namespace. The local account
+namespace uses the JWT subject only as a path hint, not as authentication; the
+actual bearer is authorized by the server before the journal is prepared.
+Token rotation does not change the namespace and tokens are never written to
+the journal. File/parent synchronization and a separate file lock precede the
+first HTTP POST. A reload or another journal instance cannot resend an attempted
+operation. An uncertain result is reconciled by its receipt; 404 after an
+attempt does not authorize another POST or a replacement operation.
+
+The narrow registration request is `POST /characters/saves/snapshot` with a
+ladder query, game token and matching launch ticket. It contains bundle identity,
+operation ID and one `fileName`/`contentBase64` entry. Fresh creation omits
+`expectedVersion` and has no deletion or progress/provenance fields. This
+contract was derived from the unchanged signed revision-6 Server Saves plugin.
+The coordinator refuses an existing server character, checks a separate
+`GET /characters/saves/snapshot/receipts/{operationId}`, reads the new manifest
+and downloads digest-checked bytes. Only matching receipt and exact initial
+header readback confirm the journal. Downloaded files are staged as a new
+isolated Switch-layout generation, without activating `DM_SAVE`. The narrow
+token is revoked on success and failure. Actual live registration remains
+unverified until a device-side POST/receipt/download round trip is observed.
+
+An explicit device-test switch `DM_ONLINE_REGISTER_DIAGNOSTICS=1`, alongside
+the package inspection switches, uses only the dedicated original-engine
+creation directory and a supplied expected hash/name input. It never scans the
+offline save directory. Its reply diagnostics retain response shapes and
+bounded error codes, not headers, tokens or response values. This development
+path is not a generic save importer or a playable-ladder claim.
 
 `NewCharacterHeader` preflights a version-105, 403-byte creation header from
 the original engine before any world entry. It checks the declared length,
@@ -91,9 +123,12 @@ or server acceptance: the caller must use a fresh isolated creation, and the
 server remains authoritative. The layout was cross-checked against the pinned
 MIT-licensed D2SSharp [Character](https://github.com/ResurrectedTrader/D2SSharp/blob/510bfaa1b5535454fb3d688d78b7cd3b0c171d76/src/D2SSharp/Model/Character.cs)
 and [PreviewData](https://github.com/ResurrectedTrader/D2SSharp/blob/510bfaa1b5535454fb3d688d78b7cd3b0c171d76/src/D2SSharp/Model/PreviewData.cs)
-readers and an actual original-engine creation on iPhone. Public tests contain
+readers and an actual original-engine creation on iPhone. It also checks the
+modern preview game-edition field and valid classes for that edition; the
+initialization flag alone does not identify Classic versus an expansion.
+Public tests contain
 only synthetic layout bytes, not a character save. This preflight is not yet
-connected to a registration button or a general save-upload API.
+connected to a product registration button or a general save-upload API.
 
 An independent D2SSharp 0.0.22 reader/writer (the dependency pinned by Reimagined Launcher v0.19.7) round-tripped the two local backup samples, character and shared stash, byte-identically. This held with embedded vanilla tables and with both primary/base text-table datasets extracted and hashed from the signed revision-4 ladder package. This is two-sample offline format evidence, not a server save receipt or a claim about all modded items. The .NET tool is a Mac development reference, not part of the native iOS game.
 
