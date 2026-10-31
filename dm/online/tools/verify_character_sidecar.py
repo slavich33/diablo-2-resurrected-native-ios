@@ -112,29 +112,34 @@ for n in [1,2,7]:cases.append((f'trailing-{n}',base+bytes(n)))
 cases.append(('oversized-plugin-count',file(body()[:-8]+struct.pack('<II',257,0))))
 cases.append(('oversized-stat-count',file(body()[:-4]+struct.pack('<I',32769))))
 
-parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--dll',required=True,type=Path)
-parser.add_argument('--vectors',type=Path)
-parser.add_argument('--output',type=Path,help='Create mode0600 synthetic corpus, never overwrite')
-args=parser.parse_args()
-if not __debug__:parser.error('Run without -O: bounded reference requires assertions')
-if args.dll.stat().st_size>32*1024*1024:parser.error('Oversized original core')
-r=SidecarReference(args.dll);results=[]
-for label,data in cases:
- r.cursor=r.arena
- try:model,error=r.decode(data)
- except Exception as e:raise RuntimeError('Reference did not complete case '+label) from e
- canonical=None
- if model is not None:
-  canonical,error=r.encode(model)
-  if canonical is None:raise ValueError('Accepted sidecar model was not encodable: '+label)
- results.append({'label':label,'inputHex':data.hex(),'accepted':model is not None,'canonicalHex':canonical.hex() if canonical is not None else None})
-report={'referenceSHA256':EXPECTED,'scope':'Version2 sidecar file structure and original SHA256/canonical encoding; no seal authentication, provenance or admission.','cases':results,'liveAdmissionVerified':False}
-if args.vectors is None and args.output is None:args.vectors=Path(__file__).resolve().parents[1]/'Tests/ReimaginedClientTests/Fixtures/character-sidecar-reference.json'
-if args.vectors:
- with args.vectors.open('rb') as file:data=file.read(8*1024*1024+1)
- if len(data)>8*1024*1024 or json.loads(data)!=report:raise ValueError('Original sidecar reference corpus mismatch')
-if args.output:
- fd=os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
- with os.fdopen(fd,'wb') as file:file.write((json.dumps(report,indent=2)+'\n').encode())
-print('Original version2 sidecar reader/writer/SHA256:',len(results),'synthetic cases;',sum(x['accepted'] for x in results),'accepted; no authenticated sidecar or game admission.')
+def main():
+ parser=argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('--dll',required=True,type=Path)
+ parser.add_argument('--vectors',type=Path)
+ parser.add_argument('--output',type=Path,help='Create mode0600 synthetic corpus, never overwrite')
+ args=parser.parse_args()
+ if not __debug__:parser.error('Run without -O: bounded reference requires assertions')
+ if args.dll.stat().st_size>32*1024*1024:parser.error('Oversized original core')
+ r=SidecarReference(args.dll);results=[]
+ for label,data in cases:
+  r.cursor=r.arena
+  try:model,error=r.decode(data)
+  except Exception as e:raise RuntimeError('Reference did not complete case '+label) from e
+  canonical=None
+  if model is not None:
+   canonical,error=r.encode(model)
+   if canonical is None:raise ValueError('Accepted sidecar model was not encodable: '+label)
+  results.append({'label':label,'inputHex':data.hex(),'accepted':model is not None,'canonicalHex':canonical.hex() if canonical is not None else None})
+ report={'referenceSHA256':EXPECTED,'scope':'Version2 sidecar file structure and original SHA256/canonical encoding; no seal authentication, provenance or admission.','cases':results,'liveAdmissionVerified':False}
+ if args.vectors is None and args.output is None:args.vectors=Path(__file__).resolve().parents[1]/'Tests/ReimaginedClientTests/Fixtures/character-sidecar-reference.json'
+ if args.vectors:
+  with args.vectors.open('rb') as file:data=file.read(8*1024*1024+1)
+  if len(data)>8*1024*1024 or json.loads(data)!=report:raise ValueError('Original sidecar reference corpus mismatch')
+ if args.output:
+  fd=os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+  with os.fdopen(fd,'wb') as file:file.write((json.dumps(report,indent=2)+'\n').encode())
+ print('Original version2 sidecar reader/writer/SHA256:',len(results),'synthetic cases;',sum(x['accepted'] for x in results),'accepted; no authenticated sidecar or game admission.')
+
+
+if __name__ == '__main__':
+ main()
