@@ -47,4 +47,4 @@ This is not a Windows runtime on iPhone. The development reference executes only
 
 ## Remaining integration
 
-Completed-D2S engine notification, received-metadata matching, genuine environment projection, history advancement/reset policy, atomic D2S+sidecar commit, server acceptance and reconnect/reload still require integration. The native advertised sidecar capability remains0. No phone installation or live admission/progress-save write was performed by these checks.
+Native history advancement and the optional engine completion boundary are documented in [CHARACTER_SIDECAR_HISTORY.md](CHARACTER_SIDECAR_HISTORY.md) and [SAVE_COMPLETION.md](SAVE_COMPLETION.md). Received-metadata matching, genuine environment projection, complete history/reset policy, atomic D2S+sidecar commit, server acceptance and reconnect/reload still require integration. The native advertised sidecar capability remains0. No phone installation or live admission/progress-save write was performed by these checks.

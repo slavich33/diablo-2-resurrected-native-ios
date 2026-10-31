@@ -12,6 +12,7 @@
 // Struct layout follows the public Horizon ABI: DirectoryEntry = {char name[0x301], pad[3], s8 type, pad[3], s64 size} (0x310 bytes).
 #include "hle.h"
 #include "front.h"
+#include "dm_save_completion.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,6 +22,12 @@
 #include <stdatomic.h>
 #include <sys/clonefile.h>
 #include <sys/xattr.h>
+#include <limits.h>
+
+// No observer is linked by default. The optional coordinator must filter its
+// explicitly bound server namespace; an offline completion grants no authority.
+__attribute__((weak)) int dm_online_d2s_completion_enabled(void) { return 0; }
+__attribute__((weak)) void dm_online_d2s_completed(const char *path, uint64_t sequence, int reason) { (void)path; (void)sequence; (void)reason; }
 
 #define RES_PATH_NOT_FOUND 0x202u      // fs 模块 2，描述 1 | fs module 2, description 1
 #define RES_PATH_EXISTS    0x402u      // fs 模块 2，描述 2 | fs module 2, description 2
@@ -55,6 +62,10 @@ static uint8_t g_fmode[65536];              // fd → 打开方式 | fd → open
 static uint8_t g_fd2s[65536]; static _Atomic uint64_t g_seq, g_d2s_wseq;
 uint64_t dm_seq_next(void) { return atomic_fetch_add(&g_seq, 1) + 1; }
 uint64_t dm_fs_d2s_wseq(void) { return atomic_load(&g_d2s_wseq); }
+static void d2s_note_sequence(uint64_t sequence) {
+    uint64_t seen = atomic_load(&g_d2s_wseq);
+    while (seen < sequence && !atomic_compare_exchange_weak(&g_d2s_wseq, &seen, sequence)) {}
+}
 static int is_d2s(const char *p) { size_t n = strlen(p); return n > 4 && !strcmp(p + n - 4, ".d2s"); }
 static uint8_t g_fsave[65536];              // fd → 是否在事务式存档挂载上（存档写注入点只数这些） | fd → whether it is on a transactional save mount (the save write injection point only counts these)
 static _Atomic int g_save_writes;           // 存档挂载上的写次数（注入点与提交日志共用） | number of writes on the save mount (shared by the injection point and the commit log)
@@ -650,10 +661,32 @@ HLE_FORCE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", "fsp-srv → ftruncate(2)
 }
 HLE_FORCE("_ZN2nn2fs9FlushFileENS0_10FileHandleE", "fsp-srv；宿主 write 已进页缓存，刷新为空操作", Result, h_fs_FlushFile, uint64_t h) { (void)h; return RES_OK; }
 HLE_FORCE("_ZN2nn2fs9CloseFileENS0_10FileHandleE", "fsp-srv → close(2)", void, h_fs_CloseFile, uint64_t h) {
-    if (!h) return;  g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;
+    if (!h) return;
+    int save = g_fsave[(int)h & 0xffff];
+    g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;
     int d2s = g_fd2s[(int)h & 0xffff]; g_fd2s[(int)h & 0xffff] = 0;
+    char completed_path[PATH_MAX]; completed_path[0] = 0;
+    if (d2s && dm_online_d2s_completion_enabled()) {
+#ifdef F_GETPATH
+        if (fcntl((int)h, F_GETPATH, completed_path)) completed_path[0] = 0;
+#elif defined(__linux__)
+        char proc_fd[64]; snprintf(proc_fd, sizeof proc_fd, "/proc/self/fd/%d", (int)h);
+        ssize_t n = readlink(proc_fd, completed_path, sizeof completed_path - 1);
+        if (n >= 0 && (size_t)n < sizeof completed_path - 1) completed_path[n] = 0;
+        else completed_path[0] = 0;
+#endif
+    }
     if ((int)h >= 0 && (int)h < 4096 && g_hm[(int)h]) { holemap *m = g_hm[(int)h]; g_hm[(int)h] = NULL; free(m->log); free(m->len); free(m->phys); free(m); }
-    close((int)h); if (d2s) atomic_store(&g_d2s_wseq, dm_seq_next()); }   // 先关再取号：取号时内容已落到文件 | Close first, then take the number: by then the content is in the file
+    if (close((int)h)) {
+        if (save) save_poison(errno);
+        return; // Never publish completion after a failed close or retry a reused fd.
+    }
+    if (d2s) {
+        uint64_t sequence = dm_seq_next(); d2s_note_sequence(sequence);
+        if (completed_path[0] && (!save || !atomic_load(&g_save_poison)))
+            dm_online_d2s_completed(completed_path, sequence, DM_SAVE_COMPLETION_CLOSE);
+    }
+}
 HLE_FORCE("_ZN2nn2fs15GetFileOpenModeENS0_10FileHandleE", "fsp-srv；打开方式由宿主记录", int, h_fs_GetFileOpenMode, uint64_t h) { return g_fmode[(int)h & 0xffff]; }
 
 // ---------- 路径操作 ----------
@@ -695,7 +728,13 @@ HLE_FORCE("_ZN2nn2fs10RenameFileEPKcS2_", "fsp-srv → rename(2)", Result, h_fs_
         if (dm_fs_test_fail("renameback") || rename(hp2, hp)) {   // 回退也失败：文件留在新路径、客体名元数据不对；不退出——在事务存档里就让本事务提交被拒（已提交版本不变，重新克隆即复原） | Rollback also failed: the file stays at the new path with wrong guest-name metadata; do not exit. In a transactional save, this transaction's commit is refused (the committed version is unchanged and recloning restores it)
             LOG("【红】fs 改名元数据失败且回退失败 errno=%d：%s 留在新路径%s", errno, hp2, in_txn_dir(hp2) ? "，本事务存档提交将被拒" : ""); if (in_txn_dir(hp2)) save_poison(e); }
         errno = e; return err_res("rename name", hp2); }
-    if (is_d2s(to)) atomic_store(&g_d2s_wseq, dm_seq_next());
+    if (is_d2s(to)) {
+        uint64_t sequence = dm_seq_next(); d2s_note_sequence(sequence);
+        if (dm_online_d2s_completion_enabled() && (!in_txn_dir(hp2) || !atomic_load(&g_save_poison))) {
+            char completed_path[PATH_MAX];
+            if (realpath(hp2, completed_path)) dm_online_d2s_completed(completed_path, sequence, DM_SAVE_COMPLETION_RENAME);
+        }
+    }
     return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "fsp-srv → stat(2)", Result, h_fs_GetEntryType, int32_t *out, const char *path) {
