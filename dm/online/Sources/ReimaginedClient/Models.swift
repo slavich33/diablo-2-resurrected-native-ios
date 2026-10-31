@@ -37,15 +37,34 @@ public struct LadderBundleDescriptor: Decodable {
     public let artifactSizeBytes: Int64
     public let compatibility: BundleCompatibility
     public let downloadPath: String
+    public var files: [LadderBundleFile]? = nil
+    public var plugins: [LadderBundlePlugin]? = nil
 }
 
-public struct BundleCompatibility: Decodable {
+public struct BundleCompatibility: Decodable, Equatable {
     public let minimumLauncherVersion: String
     public let requiredD2RLoaderVersion: String
     public let requiredD2RLoaderSha256: String
     public let requiredD2RCoreSha256: String
     public let requiredModVersion: String
     public let supportedGameVersion: String
+}
+
+public struct LadderBundleFile: Decodable, Equatable {
+    public let archivePath: String
+    public let targetPath: String
+    public let fileName: String
+    public let sha256: String
+    public let sizeBytes: Int64
+}
+
+public struct LadderBundlePlugin: Decodable, Equatable {
+    public let pluginId: String
+    public let name: String
+    public let fileName: String
+    public let targetPath: String
+    public let sha256: String
+    public let sizeBytes: Int64
 }
 
 public struct LobbyRegion: Decodable, Equatable {

@@ -2,14 +2,46 @@
 // Native Reimagined account and ladder UI; no gameplay admission or server-save write path yet.
 import UIKit
 import SafariServices
+import CryptoKit
 
 @MainActor private func onlineText(_ key: String) -> String {
     key.withCString { String(cString: dm_ui($0)) }
 }
 
+private final class OnlineDiagnosticTransport: HTTPTransport {
+    private let base = SessionTransport()
+    private let lock = NSLock()
+    private var observations: [[String: Any]] = []
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let result = try await base.send(request)
+        if ProcessInfo.processInfo.environment["DM_ONLINE_PACKAGE_DIAGNOSTICS"] == "1" {
+            record(request.url?.path ?? "", status: result.1.statusCode)
+        }
+        return result
+    }
+    private func record(_ path: String, status: Int) {
+        let routes = [("/launch-ticket", "ticket"), ("/game-token", "game-token"),
+                      ("/game-token/revoke", "game-token-revoke"), ("/characters/saves", "save-list"),
+                      ("/v2/games", "game-list"), ("/client-policy", "policy"),
+                      ("/ladders/schedule", "schedule"), ("/auth/launcher/refresh", "refresh"),
+                      ("/auth/launcher/token", "authorization")]
+        guard let route = routes.first(where: { path.hasSuffix($0.0) })?.1 else { return }
+        lock.lock()
+        observations.append(["route": route, "httpStatus": status])
+        observations = Array(observations.suffix(32))
+        let snapshot: [String: Any] = ["build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                                      "requests": observations]
+        lock.unlock()
+        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+              let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else { return }
+        try? data.write(to: root.appendingPathComponent("online-http-state.json"),
+                        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+}
+
 @MainActor
 private final class OnlineController: UIViewController, UITableViewDataSource, UITableViewDelegate, SFSafariViewControllerDelegate {
-    private let api = try! ReimaginedAPIClient()
+    private let api = try! ReimaginedAPIClient(transport: OnlineDiagnosticTransport())
     private let store = SessionKeychain()
     private var session: LauncherSession?
     private var operation: Task<Void, Never>?
@@ -155,7 +187,73 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
                 self.status.text = onlineText(self.session == nil ? "dmOnlineSignedOut" : "dmOnlineSignedIn")
                 self.table.backgroundView = result.ladders.isEmpty ? self.empty : nil
                 self.table.reloadData()
+                if let credentials { await self.inspectPackageIfRequested(credentials) }
             } catch is CancellationError {} catch { self.show(error) }
+        }
+    }
+
+    /// Explicit development inspection using a complete operator-provided ZIP
+    /// and an independently pinned public key OUTSIDE that ZIP. No trust key is
+    /// downloaded or accepted from the archive; no game/character is started.
+    private func inspectPackageIfRequested(_ credentials: LauncherSession) async {
+        guard ProcessInfo.processInfo.environment["DM_ONLINE_PACKAGE_DIAGNOSTICS"] == "1",
+              let entry = ladders.first(where: \.isLive) else { return }
+        var report: [String: Any] = ["gameAdmission": false, "characterWritten": false,
+                                  "nativeUserAgent": api.identity.userAgent]
+        var stage = "policy"
+        func saveReport() {
+            report["stage"] = stage
+            report["build"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+            guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+                  let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) else { return }
+            try? data.write(to: root.appendingPathComponent("online-package-state.json"),
+                            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+        do {
+            saveReport()
+            let policy = try await api.policy(for: entry, accessToken: credentials.accessToken)
+            guard let bundle = policy.activeBundle else { throw ClientError.invalidResponse }
+            let hash = bundle.artifactSha256.lowercased(), keyID = bundle.signingKeyId
+            guard hash.utf8.count == 64, hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  !keyID.isEmpty, keyID.utf8.count <= 64,
+                  keyID.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }) else {
+                throw ClientError.invalidResponse
+            }
+            let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let archive = root.appendingPathComponent("ReimaginedPackages/" + hash + ".zip")
+            let trust = root.appendingPathComponent("ReimaginedTrust/" + keyID + ".pem")
+            let attrs = try FileManager.default.attributesOfItem(atPath: trust.path)
+            guard ((attrs[.size] as? NSNumber)?.intValue ?? Int.max) <= 4096,
+                  attrs[.type] as? FileAttributeType == .typeRegular else { throw ClientError.invalidResponse }
+            let pem = try String(contentsOf: trust, encoding: .utf8)
+            stage = "complete-package-validation"; saveReport()
+            let worker = Task.detached(priority: .utility) {
+                let key = try P256.Signing.PublicKey(pemRepresentation: pem)
+                return try LadderArchiveVerifier(trustedKeys: [keyID: key]).verify(archive: archive, descriptor: bundle)
+            }
+            let verified = try await withTaskCancellationHandler(operation: { try await worker.value },
+                                                                  onCancel: { worker.cancel() })
+            report["packageFilesVerified"] = verified.fileCount
+            report["packageRevision"] = verified.revision
+            try Task.checkCancellation()
+            stage = "fresh-policy-check"; saveReport()
+            let fresh = try await api.policy(for: entry, accessToken: credentials.accessToken)
+            guard let current = fresh.activeBundle, verified.matches(current) else { throw ClientError.policyChanged }
+            stage = "game-save-api-reads"; saveReport()
+            let result = try await api.inspectLadderAccount(bundle: current, verifiedPackage: verified, session: credentials)
+            report["serverSaveFiles"] = result.saves.files.count
+            report["serverAuthoritative"] = result.saves.serverAuthoritative
+            report["lobbyRooms"] = result.lobby.games.count
+            report["lobbyPlayers"] = result.lobby.totalPlayers
+            report["narrowTokenRevocationAccepted"] = true
+            stage = "complete"; saveReport()
+        } catch {
+            // A narrow-token/ticket refusal must not remove the launcher's
+            // separate Keychain session or expose raw server responses.
+            report["failed"] = true
+            if case ClientError.http(let code) = error { report["httpStatus"] = code }
+            else { report["errorType"] = String(reflecting: type(of: error)) }
+            saveReport()
         }
     }
 
@@ -185,6 +283,7 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
                 self.ladders = result.ladders
                 self.table.backgroundView = result.ladders.isEmpty ? self.empty : nil
                 self.table.reloadData()
+                await self.inspectPackageIfRequested(credentials)
             } catch is CancellationError { self.status.text = onlineText("dmOnlineCancelled") }
             catch LoginListenerError.cancelled { self.status.text = onlineText("dmOnlineCancelled") }
             catch {

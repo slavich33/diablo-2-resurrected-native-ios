@@ -170,6 +170,17 @@ public final class ReimaginedAPIClient {
                                       session: session, now: now)
     }
 
+    /// Native coordinator entry: complete signed content verification must
+    /// match this exact fresh policy. This is still not runtime admission.
+    public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor,
+                             verifiedPackage: VerifiedLadderPackage,
+                             session: LauncherSession, now: Date = Date()) async throws -> LadderLaunchTicket {
+        guard verifiedPackage.ladderID == ladderID, verifiedPackage.matches(bundle) else {
+            throw ClientError.policyChanged
+        }
+        return try await launchTicket(ladderID: ladderID, bundle: bundle, session: session, now: now)
+    }
+
     /// Explicit version form for protocol fixtures/other launcher integrations.
     /// Native applications should use the metadata-derived overload above.
     public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor, launcherVersion: String,
