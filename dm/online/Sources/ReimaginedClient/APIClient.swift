@@ -70,6 +70,40 @@ public final class ReimaginedAPIClient {
         return try ReimaginedJSON.decoder().decode([LobbyRegion].self, from: bytes)
     }
 
+    /// Player endpoint, separate from the launcher's administrative server list.
+    /// Uses only the narrow game token and this ladder's current launch ticket.
+    public func lobbyGames(ladderID: UUID, gameToken: GameSessionToken,
+                           ticket: LadderLaunchTicket, now: Date = Date()) async throws -> LobbyGameList {
+        try validateLobbySession(ladderID: ladderID, gameToken: gameToken, ticket: ticket, now: now)
+        let (bytes, _) = try await json(path: "lobby/ladders/\(ladderID.uuidString.lowercased())/v2/games",
+                                       token: gameToken.accessToken, launchTicket: ticket.launchTicket)
+        let list = try ReimaginedJSON.decoder().decode(LobbyGameList.self, from: bytes)
+        try list.validate()
+        return list
+    }
+
+    /// Resolves the selected listing to a TCP endpoint and engine game number.
+    /// This GET does not itself join the room or authorize local character data.
+    public func resolveLobbyGame(gameID: String, ladderID: UUID, gameToken: GameSessionToken,
+                                 ticket: LadderLaunchTicket, now: Date = Date()) async throws -> ResolvedLobbyGame {
+        try validateLobbySession(ladderID: ladderID, gameToken: gameToken, ticket: ticket, now: now)
+        guard LobbyGame.isValidID(gameID) else { throw GameLobbyError.invalidGameID }
+        let (bytes, _) = try await json(path: "lobby/ladders/\(ladderID.uuidString.lowercased())/v2/games/\(gameID)/resolve",
+                                       token: gameToken.accessToken, launchTicket: ticket.launchTicket)
+        let game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes)
+        try game.validate()
+        return game
+    }
+
+    private func validateLobbySession(ladderID: UUID, gameToken: GameSessionToken,
+                                      ticket: LadderLaunchTicket, now: Date) throws {
+        guard ticket.ladderId == ladderID else { throw GameLobbyError.wrongLadder }
+        guard gameToken.expiresAtUtc > now, ticket.expiresAtUtc > now,
+              Self.validSecret(gameToken.accessToken), Self.validSecret(ticket.launchTicket) else {
+            throw GameLobbyError.expiredSession
+        }
+    }
+
     /// Only the narrow game token may be handed to a future game/save adapter.
     /// No fallback to the launcher's long-lived token on older servers.
     public func createGameToken(session: LauncherSession, now: Date = Date()) async throws -> GameSessionToken? {
@@ -87,7 +121,8 @@ public final class ReimaginedAPIClient {
 
     /// Read-only Server Saves metadata. Requires a narrow game token and a
     /// current ticket for this ladder. The launcher token is never a fallback.
-    /// The response schema is statically observed, not live-native verified.
+    /// The root was live-native verified with an empty list; individual file
+    /// metadata and a progress/save/reload round trip still need verification.
     public func serverSaveManifest(ladderID: UUID, gameToken: GameSessionToken,
                                    ticket: LadderLaunchTicket, now: Date = Date()) async throws -> ServerSaveManifest {
         try validateSaveSession(ladderID: ladderID, gameToken: gameToken, ticket: ticket, now: now)
