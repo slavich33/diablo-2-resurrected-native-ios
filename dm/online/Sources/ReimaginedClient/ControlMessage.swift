@@ -7,8 +7,8 @@ public enum ControlMessageError: Error, Equatable {
     case lengthMismatch, invalidFragment, unexpectedFragment, transferAlreadyComplete
 }
 
-/// Control payload inside the loader's game-packet carrier. The outer game's
-/// carrier framing and native engine admission are deliberately not inferred.
+/// Control payload inside the loader's shared game-packet carrier. Transport
+/// processing and native engine admission are deliberately not inferred.
 public struct ControlMessage {
     public static let headerSize = 18, maximumPayload = 224
     public let kind: UInt8
@@ -29,19 +29,25 @@ public struct ControlMessage {
         return data
     }
 
-    /// Client-to-server game carrier, before any transport-specific processing.
-    /// This does not describe the server-to-client carrier or mixed game stream.
-    public func clientCarrier() -> Data {
+    /// Game-packet carrier used by the inspected client and server control
+    /// senders, before transport-specific processing. Not a TCP record header.
+    public func gameCarrier() -> Data {
         let body = encoded()
         return Data([0xd0, UInt8(truncatingIfNeeded: body.count), UInt8(truncatingIfNeeded: body.count >> 8)]) + body
     }
 
-    public static func decodeClientCarrier(_ data: Data) throws -> ControlMessage {
+    public static func decodeGameCarrier(_ data: Data) throws -> ControlMessage {
         guard (21...245).contains(data.count) else { throw ControlMessageError.invalidSize }
         let bytes = Array(data)
         guard bytes[0] == 0xd0 else { throw ControlMessageError.invalidMagic }
         guard Int(bytes[1]) | Int(bytes[2]) << 8 == bytes.count - 3 else { throw ControlMessageError.lengthMismatch }
         return try decode(Data(bytes[3...]))
+    }
+
+    // Compatibility names retained for existing callers.
+    public func clientCarrier() -> Data { gameCarrier() }
+    public static func decodeClientCarrier(_ data: Data) throws -> ControlMessage {
+        try decodeGameCarrier(data)
     }
 
     public static func decode(_ data: Data) throws -> ControlMessage {

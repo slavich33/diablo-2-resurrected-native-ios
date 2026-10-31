@@ -79,6 +79,45 @@ class Reference:
   out=self.vector();span=self.span(data);ok=self.run(0x34090,[total,offset,span,out]);return bool(ok&255),self.readvec(out)
  def carrier(self,data):
   out=self.vector();self.run(0x452f20,[out,self.span(data)]);return self.readvec(out)
+
+class SenderReference(Reference):
+ """Observe real control send builders at an intercepted queue boundary.
+
+ The queue stand-ins collect bytes, never open a socket or validate admission.
+ Generic vector deallocation is a no-op inside the bounded per-case arena.
+ """
+ def __init__(self,dll):
+  super().__init__(dll);self.captured=[]
+ def hook(self,mu,pc,size,user):
+  try:
+   rva=pc-self.base
+   if rva==0x453230:  # server control queue(client ID, begin/end span)
+    client=mu.reg_read(UC_X86_REG_RCX)&0xffffffff
+    span=mu.reg_read(UC_X86_REG_RDX)
+    begin,end=struct.unpack('<QQ',mu.mem_read(span,16))
+    if not (0<=end-begin<=245):raise ValueError('reference server carrier limit')
+    self.captured.append(('server',client,bytes(mu.mem_read(begin,end-begin))));self.ret(1);return
+   if rva==0x4530e0:  # client control queue(bytes, count)
+    begin=mu.reg_read(UC_X86_REG_RCX);count=mu.reg_read(UC_X86_REG_RDX)
+    if not (0<count<=245):raise ValueError('reference client carrier limit')
+    self.captured.append(('client',None,bytes(mu.mem_read(begin,count))));self.ret(1);return
+   if rva==0x513710:self.ret();return  # generic vector free; private arena
+   super().hook(mu,pc,size,user)
+  except Exception as error:self.problem=str(error);mu.emu_stop()
+ def send(self,direction,kind,data,client=123):
+  self.captured=[];span=self.span(data)
+  if direction=='server':result=self.run(0x44c140,[client,kind,span])
+  elif direction=='client':result=self.run(0x44be50,[kind,span])
+  else:raise ValueError('Unknown sender direction')
+  ok=bool(result&255)
+  if len(self.captured)!=(1 if ok else 0):raise ValueError('Unexpected reference queue call count')
+  if ok:
+   observed,target,output=self.captured[0]
+   if observed!=direction or target!=(client if direction=='server' else None):
+    raise ValueError('Unexpected reference queue destination')
+  else:output=b''
+  return ok,output
+
 if __name__ == '__main__':
  import argparse
  parser=argparse.ArgumentParser(description=__doc__)
@@ -86,13 +125,15 @@ if __name__ == '__main__':
  parser.add_argument('--vectors',type=Path,default=Path(__file__).resolve().parents[1]/'Tests/ReimaginedClientTests/Fixtures/loader-control-reference.json')
  args=parser.parse_args();corpus=json.loads(args.vectors.read_text())
  if corpus['referenceSHA256']!=EXPECTED: raise ValueError('Unsupported reference corpus')
- r=Reference(args.dll)
+ r=SenderReference(args.dll)
  for case in corpus['vectors']:
   r.cursor=r.arena;data=bytes.fromhex(case['payloadHex'])
   if case['type']=='control':ok,output=r.control(case['kind'],data)
   elif case['type']=='fragment':ok,output=r.fragment(case['total'],case['offset'],data)
   elif case['type']=='carrier':
    ok,body=r.control(case['kind'],data);output=r.carrier(body) if ok else b''
+  elif case['type'] in ('client_send','server_send'):
+   ok,output=r.send(case['type'].split('_')[0],case['kind'],data,case.get('clientID',123))
   else:raise ValueError('Unsupported fixture kind')
   if ok!=case['accepted'] or output.hex()!=case['outputHex']:raise ValueError('Reference vector mismatch')
  print('PASS:',len(corpus['vectors']),'official encoder vectors; live game interoperability remains unverified')

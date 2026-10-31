@@ -13,7 +13,8 @@ Implemented:
 - Local application Keychain session storage, refresh/revocation requests and an explicit native-client sign-out command.
 - SHA-256 and P-256/P1363 signature verification over exact manifest bytes using caller-pinned public keys. This is one prerequisite, not complete signed-package validation.
 - D2EM v3 outer-envelope framing: bounded little-endian fields, duplicate-ID rejection and unknown-required-field rejection. Field payload semantics and game admission remain unimplemented.
-- D2RL v1 control-message codec, client-to-server carrier and bounded environment-manifest fragmentation/assembly. See [the partial protocol observations](docs/CONTROL_PROTOCOL.md); server reply semantics and live interoperability remain unverified.
+- D2RL v1 control-message codec, bidirectional control carrier and bounded environment-manifest fragmentation/assembly. See [the partial protocol observations](docs/CONTROL_PROTOCOL.md); server reply semantics and live interoperability remain unverified.
+- Incremental game-packet decoder and caller-serialized C polling bridge, with a required engine length callback, bounded buffering, retained output retry and terminal malformed/truncated-packet errors. This layer runs after transport processing and is not yet attached to the engine or raw production TCP.
 - Native TCP byte transport using Network.framework, with nonblocking C polling exports for a future verified engine adapter. Receive/send queues are bounded; backpressure, peer EOF and errors are observable. It does not implement D2RLoader packet framing or admission.
 - Narrow game-session token issuance/revocation and ladder launch-ticket request contracts, including expiry and bundle-identity checks. No automatic fallback to a launcher token.
 - Per-account/per-ladder local save directory preparation that does not copy, move, upload or enumerate characters. The live game's `DM_SAVE` mount is not switched.
@@ -53,7 +54,7 @@ The pause menu's **More → Reimagined Online** entry shares the native tools sh
 
 For an account-screen-only launch, use `-mode online`. That mode does not start the game host. The on-device overlay still needs regeneration and the complete app needs a build before the new pause-menu label is visible. The screen can read available metadata; it does not install a ladder package, obtain admission or modify character saves.
 
-Verification for this integration: 32 library tests pass, including real loopback TCP transfer through backpressure/EOF and an independent C ABI/POSIX-peer check; the new Swift sources compile for ARM64 iOS; and the actual native tools sheet, account screen and close action were exercised in a separate Mac Catalyst harness without game assets. This does not establish physical-iPhone behavior or a complete game build.
+Verification for this integration: 41 library tests pass, including real loopback TCP transfer through backpressure/EOF and an independent C ABI/POSIX-peer check; the new Swift sources compile for ARM64 iOS; and the actual native tools sheet, account screen and close action were exercised in a separate Mac Catalyst harness without game assets. This does not establish physical-iPhone behavior or a complete game build.
 
 Production verification on 2026-10-30: a developer-signed native macOS probe completed PKCE login, issued a game-session token, requested its revocation, and independently received HTTP 401 when reusing the still-unexpired token. A changed executable signed with the same client identity also read its saved session successfully. Launch-ticket requests remain fixture-tested only; no game admission or server-character write has been attempted.
 
@@ -83,4 +84,4 @@ The raw TCP transport follows the official [D2RLoader TCP/IP guide](https://d2rl
 
 ### Offline encoder reference
 
-The control codec now matches 504 bounded offline encoder cases from the pinned official core. 45 selected outputs/rejections are checked by the native Swift tests; see [the partial protocol and reproduction instructions](docs/CONTROL_PROTOCOL.md). These are component checks, not a confirmed ladder/game connection.
+The control codec and send builders match 576 bounded offline reference cases from the pinned official core. 117 selected outputs/rejections are checked by the native Swift tests; see [the partial protocol and reproduction instructions](docs/CONTROL_PROTOCOL.md). These are component checks, not a confirmed ladder/game connection.

@@ -24,18 +24,28 @@ The kind-7 payload is `total:u32-le`, `offset:u32-le`, followed by 1..216 bytes.
 
 The Swift ordered assembler is a conservative local policy for one peer/connection. Rejecting overlaps or changed totals does not reproduce the loader's whole receive state machine. Reset on timeout, rejection, disconnect or a new peer. A fully assembled manifest still requires D2EM field/compatibility validation; receiving one never grants admission.
 
-## Client-to-server carrier
+## Bidirectional control carrier at the game-packet layer
 
-The inspected client carrier is `0xd0`, a two-byte little-endian D2RL-payload length, then that payload. Its length excludes the three carrier-header bytes. `ControlMessage.clientCarrier()` produces this game message, at most 245 bytes.
+The carrier is `0xd0`, a two-byte little-endian D2RL-payload length, then that payload. Its length excludes the three carrier-header bytes. `ControlMessage.gameCarrier()` produces this game message, at most 245 bytes. The old `clientCarrier()` name remains an alias.
 
-This does not specify the server-to-client carrier, the full mixed game stream, transport-level processing/compression, ordinary gameplay packets, authenticated admission, or Server Saves. Do not treat an arbitrary TCP read as one carrier, and do not infer a successful game connection from a decoded control message.
+On 31 October 2026, the client and server control-send builders were additionally checked at their respective queue boundaries. Both produce the same carrier. The server builder preserves the supplied client ID at its queue boundary. The offline harness intercepts these queues to collect bytes; it does not test a real queue, socket, transport encoding or remote server.
+
+This does not specify transport-level framing/compression, ordinary gameplay packet lengths, authenticated admission, or Server Saves. Do not treat an arbitrary TCP read as one carrier, and do not infer a successful game connection from a decoded control message.
+
+## Incremental decoding and the native polling boundary
+
+`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. The caller must supply an independently verified engine packet-length resolver. The tests use explicitly synthetic stock packets; no D2R packet-size table is guessed or embedded. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
+
+The decoder preserves order, accepts coalesced reads, caps input storage at 256 KiB and individual packets at 64 KiB, and exposes one packet per poll. A full input buffer rejects the entire append for retry after draining. Unknown packet IDs, invalid lengths and truncated EOF terminate that decoder; it never scans gameplay bytes for the next `D2RL` magic. These caps are local memory policies.
+
+The C functions in `OnlineTransport.h` expose append/end/read operations and a synchronous length callback. All scalar ABI arguments are at least 32 bits for Apple/Horizon compatibility. The caller serializes operations and keeps the resolver context alive. Output kind 1 is ordinary gameplay; kind 2 is a complete D2RL control carrier. A short output buffer retains the packet for a larger-buffer retry. Reading or parsing a control message never sets an admitted state. The engine's roles, length resolver and delivery callbacks remain to be bound and verified.
 
 ## Verification
 
 The official core's three encoder functions were additionally evaluated on a Mac in an offline Unicorn CPU model: 276 control cases (including all 256 kind values), 216 fragment boundary cases and 12 carrier cases. All 504 results matched the independently implemented layout and acceptance rules. Generic C++ vector allocation/append helpers are substituted with bounded local memory operations; no DLL entry point, Windows OS API, game process or server is involved. This checks encoder behavior only.
 
-45 selected official outputs and rejection cases are retained in `Tests/ReimaginedClientTests/Fixtures/loader-control-reference.json`; the Swift test suite checks native encoding/decoding against them. The corpus records the pinned source-core hash and explicitly marks live interoperability unverified. Original executable bytes are not distributed.
+45 selected official outputs and rejection cases are retained in `Tests/ReimaginedClientTests/Fixtures/loader-control-reference.json`. A second corpus, `loader-control-senders.json`, adds 72 client/server send-builder cases, including invalid kinds and boundary sizes, captured at intercepted queue boundaries. All 117 fixtures are checked by the Swift suite. The 504 original encoder cases plus the 72 send-builder cases matched. Both corpora record the pinned source-core hash and explicitly mark live interoperability unverified. Original executable bytes are not distributed.
 
-To repeat those 45 checks, install `unicorn==2.1.4` in a separate Python virtual environment and run `python tools/verify_reference_vectors.py --dll /path/to/your/D2RCore.dll` from `dm/online`. The harness rejects other core hashes and uses instruction, memory and copy limits. It exposes no OS imports. This is development tooling; the iOS client remains native Swift/C/ARM64.
+To repeat the first corpus, install `unicorn==2.1.4` in a separate Python virtual environment and run `python tools/verify_reference_vectors.py --dll /path/to/your/D2RCore.dll` from `dm/online`. Add `--vectors Tests/ReimaginedClientTests/Fixtures/loader-control-senders.json` for the 72 sender cases. The harness rejects other core hashes and uses instruction, memory and copy limits. It exposes no OS imports. This is development tooling; the iOS client remains native Swift/C/ARM64.
 
 Malformed-length cases and a full 65536-byte fragment/assembly check are also covered by Swift tests. A real loopback TCP peer independently checks the client control vector while exercising bounded buffering and EOF. The separate C/POSIX check verifies the engine-facing C ABI. These checks establish component behavior, not game interoperability.

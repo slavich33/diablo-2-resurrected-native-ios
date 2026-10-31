@@ -26,38 +26,40 @@ final class LoaderReferenceTests: XCTestCase {
         })
     }
     func testNativeCodeMatchesOfficialEncoderFixtures() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "loader-control-reference", withExtension: "json"))
-        let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: url))
-        XCTAssertEqual(corpus.referenceSHA256, "2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2")
-        XCTAssertFalse(corpus.liveInteropVerified)
-        XCTAssertFalse(corpus.vectors.isEmpty)
-        for vector in corpus.vectors {
-            let payload = try data(vector.payloadHex), expected = try data(vector.outputHex)
-            switch vector.type {
-            case "control", "carrier":
-                let kind = try XCTUnwrap(vector.kind)
-                if vector.accepted {
-                    let message = try ControlMessage(kind: kind, payload: payload)
-                    if vector.type == "control" {
-                        XCTAssertEqual(message.encoded(), expected)
-                        XCTAssertEqual(try ControlMessage.decode(expected).payload, payload)
+        for resource in ["loader-control-reference", "loader-control-senders"] {
+            let url = try XCTUnwrap(Bundle.module.url(forResource: resource, withExtension: "json"))
+            let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: url))
+            XCTAssertEqual(corpus.referenceSHA256, "2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2")
+            XCTAssertFalse(corpus.liveInteropVerified)
+            XCTAssertFalse(corpus.vectors.isEmpty)
+            for vector in corpus.vectors {
+                let payload = try data(vector.payloadHex), expected = try data(vector.outputHex)
+                switch vector.type {
+                case "control", "carrier", "client_send", "server_send":
+                    let kind = try XCTUnwrap(vector.kind)
+                    if vector.accepted {
+                        let message = try ControlMessage(kind: kind, payload: payload)
+                        if vector.type == "control" {
+                            XCTAssertEqual(message.encoded(), expected)
+                            XCTAssertEqual(try ControlMessage.decode(expected).payload, payload)
+                        } else {
+                            XCTAssertEqual(message.gameCarrier(), expected)
+                            XCTAssertEqual(try ControlMessage.decodeGameCarrier(expected).payload, payload)
+                        }
                     } else {
-                        XCTAssertEqual(message.clientCarrier(), expected)
-                        XCTAssertEqual(try ControlMessage.decodeClientCarrier(expected).payload, payload)
+                        XCTAssertThrowsError(try ControlMessage(kind: kind, payload: payload))
                     }
-                } else {
-                    XCTAssertThrowsError(try ControlMessage(kind: kind, payload: payload))
+                case "fragment":
+                    let total = try XCTUnwrap(vector.total), offset = try XCTUnwrap(vector.offset)
+                    if vector.accepted {
+                        let fragment = try EnvironmentFragment(total: total, offset: offset, bytes: payload)
+                        XCTAssertEqual(fragment.encoded(), expected)
+                        XCTAssertEqual(try EnvironmentFragment.decode(expected).bytes, payload)
+                    } else {
+                        XCTAssertThrowsError(try EnvironmentFragment(total: total, offset: offset, bytes: payload))
+                    }
+                default: XCTFail("Unknown reference fixture type")
                 }
-            case "fragment":
-                let total = try XCTUnwrap(vector.total), offset = try XCTUnwrap(vector.offset)
-                if vector.accepted {
-                    let fragment = try EnvironmentFragment(total: total, offset: offset, bytes: payload)
-                    XCTAssertEqual(fragment.encoded(), expected)
-                    XCTAssertEqual(try EnvironmentFragment.decode(expected).bytes, payload)
-                } else {
-                    XCTAssertThrowsError(try EnvironmentFragment(total: total, offset: offset, bytes: payload))
-                }
-            default: XCTFail("Unknown reference fixture type")
             }
         }
     }
