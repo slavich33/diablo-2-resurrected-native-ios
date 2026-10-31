@@ -22,7 +22,19 @@ The exact original ARM64 `3.3.94012` table-descriptor initializer was run for ed
 
 Absent-role fields are zeroed, matching the original builder. Save Add retains its exact32-bit representation, including negative signed representations; no numeric conversion changes its bits. The fixed sidecar block and unrelated metadata words remain opaque.
 
-The row layout is shared; the table-manager headers are different. Read-only inspection found native manager pointer/count at+0x1290/+0x1298, whereas the reference Windows resource callback supplies+0x1258/+0x1260. This component accepts copied rows and does not dereference either live header or assume they are interchangeable. A coordinator must capture rows safely on the engine thread and provide the actual selected edition's resolved names.
+The row layout is shared; the table-manager headers are different. Native manager pointer/count are at+0x1290/+0x1298, whereas the reference Windows resource callback supplies+0x1258/+0x1260. The portable Swift snapshot accepts copied rows and does not dereference either live header or assume they are interchangeable.
+
+## Native loaded-table capture
+
+The optional `DM_NET_TABLE_CAPTURE=1` rewrite adds a read-only observation at the checked normal epilogue of the exact ARM64 ItemStatCost loader. `hle_net_tables.c` copies the finished rows synchronously, identifies the edition by the engine's manager slots and publishes owned bytes under a generation. A query/copy that crosses a reload returns `STALE`; a failed row reload invalidates the previous snapshot. The game never receives a pointer to this copy, and callers never retain its live table pointer.
+
+The native name-linker pointer is at manager+0x12a8. It is not manager+0x1a8. The original native lookup/destructor ground its bucket and node layouts. The bounded capture rejects unreadable pointers, cycles, duplicate/out-of-range IDs, excessive strings and inconsistent counts. A missing/empty linker keeps row capture available but exposes no names; it never supplies a base-game name list as a substitute. Swift also rejects invalid UTF8.
+
+`NativeItemStatCostCapture` in the iOS sources queries the C API, copies only the used IDs' names under the same generation, builds the portable snapshot and exposes `validateCurrent()` for a later save-transaction commit. This helper is not yet called by a completed-save coordinator and does not enable sidecar capability or network admission.
+
+On 2026-11-01 an isolated original ARM64 Mac run captured368 rows. A second run using the game's `-txt` path captured all368 names; its rows matched the binary-loaded rows byte for byte. All1104 item/player/both descriptor cases from that private runtime capture matched the full original Core descriptor builder. The default binary-table path had an empty linker, so it cannot currently supply a complete named snapshot by itself. No iPhone installation, live game admission or server progress-save round trip was performed by this check. Captured game data stays outside the repository.
+
+Optional diagnostic export requires an explicit `DM_NET_TABLE_CAPTURE_DIR` pointing to a private directory. It writes copied game rows/names with mode0600; these are game resources and must not become public fixtures. Normal capture performs no filesystem write without that variable.
 
 ## Reproduce
 
@@ -33,6 +45,8 @@ python dm/online/tools/verify_native_itemstatcost_schema.py /path/to/your/origin
 python dm/online/tools/verify_character_stat_descriptors.py \
   --dll /path/to/your/D2RCore.dll --main /path/to/your/original/ExeFS/main
 swift test --package-path dm/online
+make -C dm/host/tests net-tables
+bash dm/online/tests/NativeTransportABI/tables.sh
 ```
 
 The tools pin the entire original inputs. Native descriptor initialization runs with only private stack/manager fixtures and invokes no external function. The Windows reference supplies an immutable synthetic GetTables resource and generic private-arena memory/uncontended locks; its name lookup and descriptor-building code remain intact. No DLL entry point, game startup, OS API, network, save or original data table is used. Python assertions must be enabled; `--output` creates a new mode0600 synthetic corpus without overwriting files.

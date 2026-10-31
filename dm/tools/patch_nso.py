@@ -795,6 +795,14 @@ elif RULE_RUN:
     stat('private_gates_reserved')
 
 obs = list(OBS.get(BUILD_ID, []))
+# An opt-in, read-only capture after the complete ItemStatCost loader, before
+# its first stack/callee-register restore. No runtime instruction mutation.
+NET_TABLE_CAPTURE = os.environ.get('DM_NET_TABLE_CAPTURE') == '1' and NAME == 'main'
+if NET_TABLE_CAPTURE:
+    assert BUILD_ID == RULE_BUILD, 'Unsupported native table-capture module'
+    assert bytes(IMG[0x4f9600:0x4f9620]).hex() == 'ff833a91fd7b45a9f44f44a9f65743a9f85f42a9fa6741a9fc6fc6a8c0035fd6', 'Unexpected ItemStatCost epilogue'
+    obs.append((0x4f9600, 23, '913a83ff', 'net-tables-v1: completed ItemStatCost loader, x23 selected manager; read-only copied rows before normal return'))
+
 if RULE_RUN and PRIVATE_GATES:
     obs.append((0x43ecc8, 6, "b8686953", "private touch-run-v4 PRE-ldr; full800 host ABI"))
     obs.append((0x1237c60, 8, "d10143ff", "ui world anchor: camera world->screen entry (camera, point, out); host swaps x0 to a copy whose projection is shifted by the UI rect y (iPad UI kept 16:9 inside a taller screen), game camera untouched"))
@@ -817,9 +825,9 @@ if RULE_RUN and PRIVATE_GATES:
 for off, oid, ow, why in obs:
     w = struct.unpack_from('<I', IMG, off)[0]
     assert f'{w:08x}' == ow, f'观测门原指令不符 {off:#x}：{w:08x}'
-    # 只许函数入口：dm_gate 只回写 x0–x8 / x30，宿主 C 代码可能改 x9–x17；入口处这些按 AAPCS64 不承载值（参数只在 x0–x7 / x8）
-    # Function entries only: dm_gate writes back only x0–x8 / x30, and host C code may modify x9–x17; at entry these carry no values under AAPCS64 (arguments are only in x0–x7 / x8)
-    assert off in set(starts) or (oid == 6 and off == 0x43ecc8), f'private obs point not approved {off:#x}'
+    # Keep an explicit site allowlist. entry.S restores all general/vector registers
+    # and NZCV/FPSR/FPCR; structck/gatefn independently check the gate ABI.
+    assert off in set(starts) or (oid == 6 and off == 0x43ecc8) or (NET_TABLE_CAPTURE and oid == 23 and off == 0x4f9600), f'private obs point not approved {off:#x}'
     assert off < TEXT_END and off not in kinds and not any(lo <= off < hi for wseg in windows for lo, hi in [(wseg[0].address, wseg[-1].address + 4)]), f'观测门与改写点冲突 {off:#x}'
     put_branch(off, site_obs(off, oid, w)); stat('obs')
 

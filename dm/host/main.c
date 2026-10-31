@@ -152,6 +152,7 @@ static void host_preload(int argc, char **argv) {
     if (i < argc && !strcmp(argv[i], "--")) for (i++; i < argc && g_argc < 63; i++) g_argv[g_argc++] = argv[i];
     if (!n) { names[n++] = "main"; names[n++] = "sdk"; }
     load_modules(argv[1], names, n);
+    { void dm_net_tables_install(void); dm_net_tables_install(); }
     uint64_t ta = now_ns();
     probe_install();   // DM_PROBE 探针（诊断用） | DM_PROBE probes (for diagnostics)
     ticks_install();   // DM_TICKS 逐拍状态哈希（拍入口观测门） | DM_TICKS per-tick state hash (tick-entry observation gate)

@@ -4,6 +4,13 @@ DM_ROOT ?= $(HOME)/dm-work
 PY ?= $(DM_ROOT)/build/cache/dm/venv/bin/python
 EXEFS ?= $(DM_ROOT)/data/switch/3.3.94012/Update/ExeFS
 B = build
+.DEFAULT_GOAL := run
+.PHONY: net-tables
+net-tables: $(B)/t_net_tables
+	$(B)/t_net_tables
+$(B)/t_net_tables: t_net_tables.c ../hle_net_tables.c ../dm_net_tables.h ../dm.h
+	@mkdir -p $(B)
+	clang -O1 -g -Wall -Wextra -I.. t_net_tables.c ../hle_net_tables.c -o $@
 MOVIE_PACKAGES = libavformat libavcodec libavutil libswscale
 MOVIE_TEST_FLAGS ?= -O1
 .PHONY: movie-real

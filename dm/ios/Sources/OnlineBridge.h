@@ -2,4 +2,5 @@
 // Prepared startup is only one part of the remote coordinator, not admission.
 #pragma once
 #include "../../host/dm_net_binding.h"
+#include "../../host/dm_net_tables.h"
 const char *dm_ui(const char *key);
