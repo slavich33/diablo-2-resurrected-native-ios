@@ -17,6 +17,7 @@ int dm_net_remote_read(uint64_t generation, void *bytes, uint32_t capacity);
 int dm_net_remote_error(uint64_t generation);
 // Mark the prepared packet pump usable only after verified remote setup.
 // A TCP socket becoming writable is insufficient. This is not game admission.
+// Connected requires this readiness and either original start/connect request.
 int dm_net_remote_activate(uint64_t generation);
 int dm_net_remote_connect_requested(uint64_t generation);
 int dm_net_remote_start_requested(uint64_t generation);

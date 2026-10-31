@@ -171,7 +171,12 @@ int dm_net_remote_status(uint64_t client, int *connected, int *failed) {
     pthread_mutex_lock(&lock);
     int bound = state.generation && client == state.client;
     if (bound) {
-        if (connected) *connected = !state.failure && state.active && state.connect_requested;
+        // Both original entry points can establish a backend connection. The
+        // frontend start path waits on connected before reaching any later
+        // connect call; requiring connect_requested here would deadlock it.
+        // Neither request is sufficient without explicit packet-pump readiness.
+        if (connected) *connected = !state.failure && state.active &&
+            (state.connect_requested || state.start_requested);
         if (failed) *failed = !!state.failure;
     }
     pthread_mutex_unlock(&lock);

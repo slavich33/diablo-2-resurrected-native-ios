@@ -110,7 +110,9 @@ int main(int argc, char **argv) {
     assert(!dm_net_remote_status(0x5678, &connected, &failed) && connected == -1 && failed == -1);
     assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
     assert(!dm_net_remote_activate(generation));
-    assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
+    // The original remote frontend waits for start to become connected before
+    // it can progress. A later connect method is not required for this path.
+    assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
     assert(dm_net_test_connect_gate(0x1234, 1, 2, 3, 4, 5, 6, 7, 8) == 0x1234);
     assert(dm_net_remote_connect_requested(generation) == 1);
     assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
@@ -180,6 +182,28 @@ int main(int argc, char **argv) {
     assert(!dm_net_remote_fail(next, DM_NET_INVALID));
     assert(dm_net_remote_error(next) == DM_NET_INVALID);
     assert(!dm_net_remote_detach(next));
+    // Readiness may precede or follow either original request. With no request
+    // it must never report a connection, and failures cannot be reactivated.
+    for (int start = 0; start <= 1; start++) {
+        for (int ready_first = 0; ready_first <= 1; ready_first++) {
+            next = dm_net_remote_attach(0x1234); assert(next);
+            assert(!dm_net_remote_start_requested(next));
+            assert(!dm_net_remote_connect_requested(next));
+            if (ready_first) assert(!dm_net_remote_activate(next));
+            assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
+            assert(start ? dm_net_remote_start(0x1234) : dm_net_remote_connect(0x1234));
+            assert(dm_net_remote_status(0x1234, &connected, &failed) && connected == ready_first && !failed);
+            assert(!dm_net_remote_activate(next));
+            assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
+            assert(dm_net_remote_start_requested(next) == start);
+            assert(dm_net_remote_connect_requested(next) == !start);
+            assert(!dm_net_remote_fail(next, DM_NET_INVALID));
+            assert(dm_net_remote_activate(next) == DM_NET_INVALID);
+            assert(start ? dm_net_remote_start(0x1234) : dm_net_remote_connect(0x1234));
+            assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && failed);
+            assert(!dm_net_remote_detach(next));
+        }
+    }
     puts("ARM64 engine shims passed: queues, lifecycle/status, no local fallback, start/connect gates with ninth argument, stale generations and overflow disconnect.");
     return 0;
 }
