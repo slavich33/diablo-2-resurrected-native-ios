@@ -43,7 +43,8 @@ final class NewCharacterRegistrationTests: XCTestCase {
         init(bundle: LadderBundleDescriptor, header: NewCharacterHeader, root: URL) { self.bundle = bundle; self.header = header; self.root = root }
         func response(_ body: Any) throws -> Data { try JSONSerialization.data(withJSONObject: body) }
         func receipt() throws -> Data {
-            try response(["operationId": operation!, "written": [["fileName": header.fileName, "sha256": header.sha256, "version": 1]], "deleted": []])
+            try response(["operationId": operation!, "ladderId": bundle.ladderId.uuidString,
+                "written": [["fileName": header.fileName, "sha256": header.sha256, "version": 1]], "deleted": []])
         }
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             let path = request.url!.path; paths.append(path)
@@ -168,6 +169,9 @@ final class NewCharacterRegistrationTests: XCTestCase {
         let journal = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
         let bad = try JSONSerialization.data(withJSONObject: ["written": [["fileName": header.fileName, "sha256": "wrong", "version": 1]]])
         XCTAssertThrowsError(try journal.observeReceipt(bad)); XCTAssertEqual(journal.state, .prepared)
+        let wrongScope = try JSONSerialization.data(withJSONObject: ["ladderId": UUID().uuidString,
+            "written": [["fileName": header.fileName, "sha256": header.sha256, "version": 1]]])
+        XCTAssertThrowsError(try journal.observeReceipt(wrongScope)) { XCTAssertEqual($0 as? RegistrationError, .invalidReceipt) }
         var data = try JSONSerialization.jsonObject(with: Data(contentsOf: journal.url)) as! [String: Any]
         data["bodySHA256"] = "wrong"
         try JSONSerialization.data(withJSONObject: data).write(to: journal.url)

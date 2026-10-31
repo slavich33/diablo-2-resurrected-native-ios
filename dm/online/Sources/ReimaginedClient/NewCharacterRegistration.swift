@@ -261,8 +261,8 @@ extension ReimaginedAPIClient {
     }
 }
 
-/// Static plugin contract pending independent live verification. The GET
-/// receipt and downloaded save must both match before the journal is confirmed.
+/// Live native-iPhone creation/receipt/download contract. The GET receipt and
+/// downloaded save must both match before the journal is confirmed.
 public struct ServerSaveWriteReceipt: Decodable {
     public struct Written: Decodable {
         public let fileName: String
@@ -270,13 +270,15 @@ public struct ServerSaveWriteReceipt: Decodable {
         public let version: Int64?
     }
     public let operationId: String?
+    public let ladderId: UUID
     public let written: [Written]
     public let deleted: [String]?
 
     @discardableResult
     public static func decodeAndValidate(_ data: Data, journal: NewCharacterJournal) throws -> ServerSaveWriteReceipt {
         let result = try ReimaginedJSON.decoder().decode(Self.self, from: data)
-        guard result.operationId == nil || result.operationId?.lowercased() == journal.operationID,
+        guard result.ladderId == journal.ladderID,
+              result.operationId == nil || result.operationId?.lowercased() == journal.operationID,
               result.deleted?.isEmpty != false, result.written.count == 1,
               let file = result.written.first, file.fileName.caseInsensitiveCompare(journal.fileName) == .orderedSame,
               file.sha256.lowercased() == journal.fileSHA256, file.version == nil || file.version! > 0 else {

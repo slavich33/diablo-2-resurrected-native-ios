@@ -27,7 +27,8 @@ signed revision-6 archive locally, obtained its own launch ticket/narrow token
 and accepted the same typed empty server-authoritative save response (200).
 The phone also read the player lobby and received 204 for its token-revocation
 request. This removes a Mac-only dependency for those API reads; per-file
-metadata, new-character registration, actual downloads and progress/save
+metadata and actual downloads were still unverified at that stage. The later
+fresh-character test below verified one initial header; gameplay progress/save
 round trips remain unverified. See [LADDER_PACKAGES.md](LADDER_PACKAGES.md).
 
 The earlier probe used a manually supplied debug value `0.1.0` and was refused
@@ -41,9 +42,11 @@ Windows platform, binary hash, plugin behavior or game compatibility is claimed
 by the application version or returned ticket.
 
 Per-file `fileName`, `sha256`, `version` and `byteCount`, with optional
-`characterName`, `corrupt` and `lastSavedAtUtc`, are still inferred from plugin
-inspection and synthetic fixtures. An empty live list does not validate entry
-fields, corrupt-file handling or individual save downloads.
+`characterName`, `corrupt` and `lastSavedAtUtc`, were initially inferred from
+plugin inspection. The physical fresh-character test subsequently accepted one
+real nonempty entry with those fields and downloaded matching bytes. The
+server also returned `kind` and `saveVersion`. Corrupt-file handling and full
+progress/stash entries still need live verification.
 
 `downloadServerSave` reads raw bytes from `GET /characters/saves/{fileName}`
 with the ladder query and the same narrow credentials. Static inspection found
@@ -53,7 +56,8 @@ server version fails verification instead of overwriting an existing snapshot.
 The native HTTP/download limit is 8 MiB per file; the decoder's larger local
 staging limit does not bypass it. Filename percent signs, Unicode and fragment
 characters are escaped as a single path component. A native live download of
-an actual file remains unverified; the accepted account list was empty.
+an initial 403-byte file is now verified below; gameplay-progress downloads and
+the Unicode/percent filename cases remain outside that live observation.
 
 `VerifiedServerSave` verifies byte count and SHA-256 before staging.
 `ServerSaveSnapshot.stage` commits a complete set into a new isolated account
@@ -67,7 +71,8 @@ file length) before creating any generation. This is a header preflight, not
 an item-stat/quest parser, a checksum validator or a format migration. An
 isolated native Mac run loaded the prepared directory made from local phone
 backup fixtures and reached the world. A genuine Windows/server save round
-trip is still unverified; no server authority mode is inferred from that test.
+trip for actual gameplay progress is still unverified; no server authority mode
+is inferred from that isolated fixture test.
 
 Local staging accepts only `.d2s`/`.d2i` names without path separators, control
 characters or Windows-reserved path characters. Case and normalized-name
@@ -105,14 +110,26 @@ The coordinator refuses an existing server character, checks a separate
 and downloads digest-checked bytes. Only matching receipt and exact initial
 header readback confirm the journal. Downloaded files are staged as a new
 isolated Switch-layout generation, without activating `DM_SAVE`. The narrow
-token is revoked on success and failure. Actual live registration remains
-unverified until a device-side POST/receipt/download round trip is observed.
+token is revoked on success and failure.
 
 The first physical-device attempt stopped at receipt lookup with HTTP 400
 before any POST. The initial implementation used a GUID; the inspected plugin
 instead generates a 64-character digest. The journal migrates a legacy GUID
 only while it is durably `prepared`, retaining the old unsent identifier for
 audit. An attempted/unknown operation is never replaced by this migration.
+
+Build `1793475741` (code `48fc46e`) subsequently completed the real iPhone
+registration: initial receipt lookup 404, one snapshot POST 200, separate receipt
+GET 200, nonempty manifest and matching binary download. The server reported
+one character at version 1, save version 105, 403 bytes; the source header's
+modern preview identifies Reign of the Warlock. The journal was independently
+copied from the phone in confirmed state, with matching ladder, receipt digest
+and downloaded bytes in isolated generations. After an explicit process
+restart, receipt and download succeeded again with the same operation ID,
+one server character/version 1 and no creation POST in the new run. Twenty
+offline-save files independently read before/after app updates were unchanged.
+The original engine and game TCP session were not started; this is initial
+character persistence, not saved gameplay progress or playable ladder.
 
 An explicit device-test switch `DM_ONLINE_REGISTER_DIAGNOSTICS=1`, alongside
 the package inspection switches, uses only the dedicated original-engine
