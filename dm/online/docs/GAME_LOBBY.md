@@ -78,3 +78,13 @@ the development package used the repository's free-team packaging variant.
 Original game resources, generated libraries, signed apps, private identities
 and device captures are not published here. This is a startup/UI verification,
 not a world-performance, authenticated-login or playable-ladder result.
+
+Subsequently, the user completed the official authorization flow on that
+physical iPhone. A new device-side diagnostic identified the same build with
+`signedIn=true`, one ladder and eight regions after ladder selection. An
+independent capture showed the signed-in native account screen. After a
+separate original-game test and a return to the account screen, a fresh
+diagnostic still reported `signedIn=true`; no Mac session was copied into the
+iPhone. This confirms device authorization, authenticated policy/region reads
+and local session persistence across app restart. It does not confirm a
+device-side launch ticket, player-room list, game admission or server save.

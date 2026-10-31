@@ -4,7 +4,7 @@
 
 This is an experimental native Apple client for the public Reimagined launcher API. The goal is to implement the missing client components and integrate them into the iOS port, potentially enabling iPhone users to participate in the existing Reimagined ladder.
 
-**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. Production PKCE sign-in, authenticated API reads, a launch ticket for a verified signed revision-5 package, an empty server-authoritative save list, the real player lobby and game-endpoint resolution have been verified with a native macOS probe. A socket connected to the advertised game endpoint and received its initial `af 00`, sending zero bytes. The engine/save paths remain disconnected; no iPhone login, game admission or server character progress/save round trip has been verified.
+**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. Production sign-in on a physical iPhone, an authenticated ladder selection and eight returned regions have been verified; the signed-in session also survived an app restart. A native macOS probe separately verified a launch ticket for a verified signed revision-5 package, an empty server-authoritative save list, the real player lobby and game-endpoint resolution. A socket connected to the advertised game endpoint and received its initial `af 00`, sending zero bytes. The engine/save paths remain disconnected; game admission and a server character progress/save round trip have not been verified.
 
 Implemented:
 
@@ -21,6 +21,7 @@ Implemented:
 - Narrow game-session token issuance/revocation and ladder launch-ticket request contracts, including expiry and bundle-identity checks. No automatic fallback to a launcher token.
 - Native platform identity and an application-version ticket overload using the app's actual `CFBundleShortVersionString`. The old manual debug value was not the native shell's version; an unversioned executable cannot use the new overload.
 - Native read-only Server Saves list decoding with the live `ladderId`/`serverAuthoritative`/`saves` root contract and ladder checks before staging. Live verification covered an empty account list, not individual files or saved progress.
+- Version-105 new-character header preflight: bounded creation-only layout, name, initial flags, level and checksum checks, without editing or uploading saves. A fresh isolated header was created by the original engine on iPhone; server registration is not yet verified.
 - Native read-only player lobby and selected-game resolution using narrow credentials, bounded IDs, typed environment summaries and validated endpoint/game-number fields. Both typed readers accepted live replies; see [GAME_LOBBY.md](docs/GAME_LOBBY.md). Server summaries never stand in for the native client's own fingerprint.
 - Per-account/per-ladder local save directory preparation that does not copy, move, upload or enumerate characters. The live game's `DM_SAVE` mount is not switched.
 - A macOS probe using an identifiable native-client User-Agent, read-only by default.
@@ -71,7 +72,7 @@ The read-only engine-input check validates the original Switch `3.3.94012` NSO m
 
 ## Remaining integration
 
-1. Complete physical-device authorization and the authenticated policy/region path. The full app, character-selection rendering and anonymous account/ladder screen have been verified on an iPhone; device login and an actual ladder game remain unverified.
+1. Extend the verified physical-device authorization and authenticated policy/region path to the remaining game/save coordinator. Device sign-in, one selected ladder, eight regions and session persistence across restart are verified; an actual ladder game remains unverified.
 2. Integrate complete signed ladder package validation into the iOS product and implement the native environment/plugin contract. Private inspection validated revision 5's complete signed package; a correctly identified native application obtained its ticket and resolved a real game endpoint. The gameplay compatibility contract remains incomplete.
 3. Connect the C transport ABI (`dm/ios/Sources/OnlineTransport.h`) to verified native game-engine callbacks and implement the D2RLoader gameplay environment handshake and packet framing. Public plugin-network interfaces do not provide this implementation.
 4. Bind the prepared save namespace before mounting `DM_SAVE`, then implement native Server Saves behavior, compatible character serialization, conflict handling and confirmed server round trips. Directory preparation is not server synchronization.

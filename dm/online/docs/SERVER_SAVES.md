@@ -68,10 +68,24 @@ and 128 MiB per snapshot; these are client memory limits, not server promises.
 
 The inspected plugin supports a server-authoritative mode in which the game
 server saves progress and local edits are not uploaded; new-character
-registration is separate. Which mode is enabled for a particular ladder has
-not been verified by our accepted API read. No upload, new-character
+registration is separate. The accepted revision-5 account list reported
+`serverAuthoritative=true`; that does not authorize importing existing offline
+characters or establish the write/registration contract. No upload, new-character
 registration, journal/provenance API, deletion or offline-character import is
 implemented here. The existing offline save path remains separate.
+
+`NewCharacterHeader` preflights a version-105, 403-byte creation header from
+the original engine before any world entry. It checks the declared length,
+checksum, initial-character flags, level one and matching ASCII name. It
+rejects full/progress saves, mismatched names and unsupported formats without
+editing bytes or making HTTP requests. Passing it is not proof of provenance
+or server acceptance: the caller must use a fresh isolated creation, and the
+server remains authoritative. The layout was cross-checked against the pinned
+MIT-licensed D2SSharp [Character](https://github.com/ResurrectedTrader/D2SSharp/blob/510bfaa1b5535454fb3d688d78b7cd3b0c171d76/src/D2SSharp/Model/Character.cs)
+and [PreviewData](https://github.com/ResurrectedTrader/D2SSharp/blob/510bfaa1b5535454fb3d688d78b7cd3b0c171d76/src/D2SSharp/Model/PreviewData.cs)
+readers and an actual original-engine creation on iPhone. Public tests contain
+only synthetic layout bytes, not a character save. This preflight is not yet
+connected to a registration button or a general save-upload API.
 
 An independent D2SSharp 0.0.22 reader/writer (the dependency pinned by Reimagined Launcher v0.19.7) round-tripped the two local backup samples, character and shared stash, byte-identically. This held with embedded vanilla tables and with both primary/base text-table datasets extracted and hashed from the signed revision-4 ladder package. This is two-sample offline format evidence, not a server save receipt or a claim about all modded items. The .NET tool is a Mac development reference, not part of the native iOS game.
 
