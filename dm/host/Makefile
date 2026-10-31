@@ -35,7 +35,6 @@ SRC=\
 	loader.c \
 	main.c \
 	memstat.m \
-	net_engine_entry.S \
 	romfs_validate.c \
 	dm_actions.c \
 	dm_autobuff.c \

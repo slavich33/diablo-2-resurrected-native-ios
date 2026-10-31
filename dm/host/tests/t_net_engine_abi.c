@@ -12,6 +12,12 @@ extern void dm_net_test_receive_body(void);
 extern void dm_net_test_send_body(void);
 extern const unsigned char dm_net_test_packet[4];
 
+// Link-only stubs for the other entry.S symbols. These ABI tests call queue
+// handlers directly; a separate native game run checks actual gate dispatch.
+uint64_t gate_dispatch(uint64_t pc, uint64_t *regs) { (void)pc; (void)regs; abort(); }
+uint64_t unimpl_c(unsigned index, uint64_t *regs) { (void)index; (void)regs; abort(); }
+void dm_thread_returned(void) { abort(); }
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     setenv("DM_NET_ENGINE_TRACE", argv[1], 1);

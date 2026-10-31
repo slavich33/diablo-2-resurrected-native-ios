@@ -12,7 +12,7 @@ The receive output is a 24-byte `{begin:u64,end:u64,present:u8,padding}`. The cu
 
 The first implementation instrumented individual calls at `0x2cec94` and `0x2cfa5c`. That receive call only covered a system-channel caller, so it missed the main gameplay queue. New builds cut the methods themselves. The old SVC handlers remain for previously built diagnostic modules.
 
-Each method's first two instructions are replaced offline by `svc; ret`. `net_engine_entry.S` reconstructs exactly their original stack prologue and branches into the signed rewritten body at entry+8. This preserves the Horizon hidden x8 result argument without generating executable code or changing guest vtables at runtime. Gate dispatch validates the original module-relative site and identifies its mapped module from the gate return PC.
+Each method's first two instructions are replaced offline by `svc; ret`. `entry.S` reconstructs exactly their original stack prologue and branches into the signed rewritten body at entry+8. This preserves the Horizon hidden x8 result argument without generating executable code or changing guest vtables at runtime. Gate dispatch validates the original module-relative site and identifies its mapped module from the gate return PC.
 
 `tools/check_engine_input.py` verifies the original module ID, all three NSO segment hashes, the queue-method windows and prior call-site anchors. The rewriter also checks every replaced byte. Use the owner's original modules:
 
