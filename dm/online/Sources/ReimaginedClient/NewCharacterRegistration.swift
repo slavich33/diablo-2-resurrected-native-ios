@@ -107,8 +107,9 @@ public final class NewCharacterJournal {
         let fd = try Self.acquireLock(url)
         defer { flock(fd, LOCK_UN); Darwin.close(fd) }
         let disk = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
-        guard disk.operationID == record.operationID, disk.body == record.body, disk.header == record.header,
-              disk.accountDigest == record.accountDigest else { throw RegistrationError.invalidJournal }
+        guard disk.format == 1, disk.operationID == record.operationID, disk.body == record.body, disk.header == record.header,
+              disk.bodySHA256 == record.bodySHA256, disk.bodySHA256 == Self.digest(disk.body),
+              disk.name == record.name, disk.accountDigest == record.accountDigest else { throw RegistrationError.invalidJournal }
         guard disk.state == .prepared else { throw RegistrationError.alreadyAttempted }
         record = disk
         guard matches(package) else { throw ClientError.policyChanged }

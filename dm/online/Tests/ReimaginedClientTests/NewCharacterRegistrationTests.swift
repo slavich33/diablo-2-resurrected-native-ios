@@ -169,6 +169,7 @@ final class NewCharacterRegistrationTests: XCTestCase {
         var data = try JSONSerialization.jsonObject(with: Data(contentsOf: journal.url)) as! [String: Any]
         data["bodySHA256"] = "wrong"
         try JSONSerialization.data(withJSONObject: data).write(to: journal.url)
+        XCTAssertThrowsError(try journal.beginAttempt(package: proof)) { XCTAssertEqual($0 as? RegistrationError, .invalidJournal) }
         XCTAssertThrowsError(try NewCharacterJournal(header: header, scope: scope, package: proof, root: root))
     }
 }
