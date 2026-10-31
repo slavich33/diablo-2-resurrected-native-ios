@@ -43,10 +43,14 @@ class SidecarReference(MetadataReference):
   ok=bool(self.run(0xa320,[m,v,e])&255)
   return self.readvec(v) if ok else None,struct.unpack('<I',self.mu.mem_read(e,4))[0]
  def decode(self,d):
-  m=self.alloc(0x240);self.mu.mem_write(m,bytes(0x240))
+  m=self.alloc(0x280);self.mu.mem_write(m,bytes(0x248));guard=bytes([0xa7])*0x38;self.mu.mem_write(m+0x248,guard)
   for x in range(0x120,0x200,0x20):self.putq(m+x+0x18,15)
   e=self.alloc(4);self.mu.mem_write(e,bytes(4));ok=bool(self.run(0xa8a0,[self.span(d),m,e])&255)
-  return m if ok else None,struct.unpack('<I',self.mu.mem_read(e,4))[0]
+  if bytes(self.mu.mem_read(m+0x248,0x38))!=guard:raise ValueError('Original sidecar model crossed its 0x248-byte allocation')
+  if ok and bytes(self.mu.mem_read(m+0x240,2))!=b'\2\0':raise ValueError('Original sidecar model lost its file-version field')
+  error=struct.unpack('<I',self.mu.mem_read(e,4))[0]
+  if ok and error:raise ValueError('Successful original sidecar decode left a nonzero error status')
+  return m if ok else None,error
  def readvec(self,p):
   start,end,cap=struct.unpack('<QQQ',self.mu.mem_read(p,24))
   if not start<=end<=cap or end-start>2*1024*1024+44:raise ValueError('Invalid sidecar reference vector')
