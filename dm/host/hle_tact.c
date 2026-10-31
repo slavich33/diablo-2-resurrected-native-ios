@@ -21,6 +21,7 @@
 // Basis for equivalence: libdeflate_zlib_decompress likewise verifies the zlib header and adler32 and allows output shorter than capacity;
 // an offline cross-check of all 4,979 files before character select (558.8 MiB of output) gives MD5 == the list's CKey.
 #include "hle.h"
+#include "dm_net_engine.h"
 #include "../third_party/libdeflate/libdeflate.h"
 #include <CommonCrypto/CommonDigest.h>
 #include <fcntl.h>
@@ -271,6 +272,8 @@ __attribute__((weak)) int dm_touch_game_hide_own_glyph(uint64_t widget) { (void)
 
 uint64_t svc_host_call(int num, uint64_t *regs) {
     switch (num) {
+    case SVC_HOST_NET_CLIENT_SEND: svc_net_client_send(regs); return 1;
+    case SVC_HOST_NET_CLIENT_POLL: svc_net_client_poll(regs); return 1;
     case SVC_HOST_PRIVATE_SKILL_AIM: { void svc_private_skill_aim(uint64_t *); svc_private_skill_aim(regs); return 1; }
     case SVC_HOST_PRIVATE_SKILL_RENDER: {
         // 「不画原版技能格图标」只在触屏模式要（图标由我们的技能圈画）；手柄模式是原版底栏，图标得照画——先前不分模式，手柄版底栏六格全空（线上 iPad + 实体手柄反馈，Mac 上复现）

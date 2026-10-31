@@ -82,6 +82,24 @@ public final class ReimaginedAPIClient {
         _ = try await json(path: "auth/launcher/game-token/revoke", method: "POST", body: Data(), token: token.accessToken)
     }
 
+    /// Read-only Server Saves metadata. Requires a narrow game token and a
+    /// current ticket for this ladder. The launcher token is never a fallback.
+    /// The response schema is statically observed, not live-native verified.
+    public func serverSaveManifest(ladderID: UUID, gameToken: GameSessionToken,
+                                   ticket: LadderLaunchTicket, now: Date = Date()) async throws -> ServerSaveManifest {
+        guard ticket.ladderId == ladderID else { throw ServerSaveError.wrongLadder }
+        guard gameToken.expiresAtUtc > now, ticket.expiresAtUtc > now,
+              Self.validSecret(gameToken.accessToken), Self.validSecret(ticket.launchTicket) else {
+            throw ServerSaveError.expiredSession
+        }
+        let (bytes, _) = try await json(path: "characters/saves", token: gameToken.accessToken,
+            query: [URLQueryItem(name: "ladderId", value: ladderID.uuidString.lowercased())],
+            launchTicket: ticket.launchTicket)
+        let manifest = try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: bytes)
+        try manifest.validate()
+        return manifest
+    }
+
     /// Transport contract only: a returned ticket does not validate the bundle
     /// or admit the native engine. Call only after complete bundle validation.
     public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor, launcherVersion: String,
@@ -140,8 +158,12 @@ public final class ReimaginedAPIClient {
         return result
     }
 
-    private func json(path: String, method: String = "GET", body: Data? = nil, token: String? = nil) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: origin.appendingPathComponent(path), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+    private func json(path: String, method: String = "GET", body: Data? = nil, token: String? = nil,
+                      query: [URLQueryItem] = [], launchTicket: String? = nil) async throws -> (Data, HTTPURLResponse) {
+        var components = URLComponents(url: origin.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { components.queryItems = query }
+        guard let url = components.url else { throw ClientError.invalidOrigin }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpMethod = method
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -149,6 +171,7 @@ public final class ReimaginedAPIClient {
         request.setValue("D2RMobile-Reimagined/0.1", forHTTPHeaderField: "User-Agent")
         if let body, !body.isEmpty { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let launchTicket { request.setValue(launchTicket, forHTTPHeaderField: "X-Ladder-Launch-Ticket") }
         let (bytes, response) = try await transport.send(request)
         guard (200..<300).contains(response.statusCode) else { throw ClientError.http(response.statusCode) }
         guard bytes.count <= 8 * 1024 * 1024 else { throw ClientError.oversizedResponse }

@@ -13,7 +13,7 @@ cd diablo-2-resurrected-native-ios
 **This fork: native Reimagined integration for iOS/macOS (experimental).**
 Our implementation is in [`dm/online`](dm/online), with the iOS account UI in [`dm/ios/Sources/dm_online.swift`](dm/ios/Sources/dm_online.swift).
 See [our verification status and source-build entry points](docs/REIMAGINED_NATIVE_STATUS.md).
-The native components pass 41 Swift tests and 576 offline encoder/send-builder checks; full ladder gameplay and Server Saves remain unverified.
+The native components pass 44 Swift tests and 576 offline encoder/send-builder checks; full ladder gameplay and Server Saves remain unverified. Optional ARM64 engine-call shims and isolated server-save snapshot preparation are documented in the [integration status](docs/REIMAGINED_NATIVE_STATUS.md).
 
 The original project's description, screenshots and performance figures follow below. Results for this fork's Reimagined integration are recorded in the status document above.
 

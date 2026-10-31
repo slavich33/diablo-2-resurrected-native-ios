@@ -21,6 +21,10 @@ ANCHORS = [
     ("command_delivery", 0x5D3A88, 0x632510, "d1ce4c04a734bc57b7202820c95f06182f674f399b21a794fafabfa3a983d467"),
     ("system_delivery", 0x5D39C8, 0x6310B0, "9dbfba30ab7d8615d1518e355be456b4817d6bd318da24c8c1ece15aaa5f8d4a"),
 ]
+INDIRECT_ANCHORS = [
+    ("client_send", 0x2CEC94, 8, "ac47aa837c7668c87613e35a52e4fb1c007c886c9f87a3e520e9e4108a281598"),
+    ("client_receive", 0x2CFA5C, 9, "873b0242ffee7458d2494faf1d96f7d5c1d2da16c4c7ee3de21007190ded9141"),
+]
 
 
 def check(path):
@@ -63,6 +67,12 @@ def check(path):
         if instruction >> 26 != 0b100101 or actual != target or hashlib.sha256(text[site - 16:site + 20]).hexdigest() != expected:
             raise ValueError("Engine call-site window does not match")
         result["anchors"].append({"name": name, "moduleOffset": hex(site), "targetOffset": hex(target), "windowSha256": expected})
+    for name, site, register, expected in INDIRECT_ANCHORS:
+        instruction = struct.unpack_from("<I", text, site)[0]
+        if instruction != (0xD63F0000 | (register << 5)) or hashlib.sha256(text[site - 16:site + 20]).hexdigest() != expected:
+            raise ValueError("Engine virtual-call window does not match")
+        result["anchors"].append({"name": name, "moduleOffset": hex(site),
+                                  "targetRegister": register, "windowSha256": expected})
     return result
 
 

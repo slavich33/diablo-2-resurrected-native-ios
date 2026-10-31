@@ -12,6 +12,8 @@ The base project runs the user's own Switch ARM64 game program through native pl
 | Native TCP stream and polling C interface | [`GameTCPStream.swift`](../dm/online/Sources/ReimaginedClient/GameTCPStream.swift), [`OnlineTransport.h`](../dm/ios/Sources/OnlineTransport.h) |
 | Control-payload codec and partial protocol | [`ControlMessage.swift`](../dm/online/Sources/ReimaginedClient/ControlMessage.swift), [`CONTROL_PROTOCOL.md`](../dm/online/docs/CONTROL_PROTOCOL.md) |
 | Incremental game-packet decoder and C polling bridge | [`GamePacketStream.swift`](../dm/online/Sources/ReimaginedClient/GamePacketStream.swift), [`GamePacketBridge.swift`](../dm/online/Sources/ReimaginedClient/GamePacketBridge.swift) |
+| Optional ARM64 client-call instrumentation | [`hle_net_engine.c`](../dm/host/hle_net_engine.c), [`ENGINE_BRIDGE.md`](../dm/online/docs/ENGINE_BRIDGE.md) |
+| Server-save metadata reader and isolated snapshot staging | [`ServerSaves.swift`](../dm/online/Sources/ReimaginedClient/ServerSaves.swift), [`SERVER_SAVES.md`](../dm/online/docs/SERVER_SAVES.md) |
 | iOS account UI integration | [`dm_online.swift`](../dm/ios/Sources/dm_online.swift) |
 | Native Apple host and iOS app build | [`dm/host`](../dm/host), [`dm/ios`](../dm/ios) |
 
@@ -19,22 +21,25 @@ The base project runs the user's own Switch ARM64 game program through native pl
 
 Latest native component checks, 31 October 2026:
 
-- 41 Swift tests passed, including real local TCP peers, bounded buffering, EOF, API contracts, reference vectors, every split boundary of a maximum-sized control carrier, mixed game/control fixtures and parser terminal errors.
+- 44 Swift tests passed, including real local TCP peers, bounded buffering, EOF, API contracts, reference vectors, mixed game/control streams, refused save reads, snapshot readback, digest failure, version mismatch, path traversal and case collisions.
 - 576 offline reference cases matched the pinned official D2RLoader core: 276 control cases, 216 fragment cases, 12 carrier cases and 72 client/server control-send-builder cases. 117 reference outputs/rejections are included in the Swift fixtures. The send-builder reference intercepts queue boundaries to collect bytes; the reference tools do not run a Windows game session or a real server queue. See the partial protocol document for reproduction.
 - Independent C callers verified the native TCP round trip against a POSIX peer and the packet ABI's length callback, split input, retained short-buffer retry, ordered drain and truncated EOF. The game-packet bridge is not yet attached to the engine or raw production TCP; ordinary lengths in these checks are synthetic fixtures.
 - The native library and iOS UI bridge compiled for ARM64 iOS. The account UI was separately exercised in a Mac Catalyst harness.
+- The optional client send/receive call shims passed an independent ARM64 assembly ABI test, including receive's hidden `x8` output. The full Mac host and opt-in main/SDK rewrite completed; the current library and shims compiled for ARM64 iOS. An isolated offline Mac run reached the world with a copied save, but did not exercise the remote-client calls. No runtime remote binding is claimed.
 - Genuine production browser authorization and authenticated API reads succeeded in a signed native macOS probe. Short-lived game-token issue/revocation succeeded; an independent repeat request with the revoked, unexpired token was rejected with HTTP 401. Session readback also succeeded after a signed probe binary update.
 
 These checks cover components. iPhone account login, live game admission, sustained multiplayer and server-character save/readback remain unverified. Upstream performance measurements in the main README describe the original project.
 
-On 2026-10-31, the signed macOS probe additionally read a live authenticated policy: one active Hallowing Ladder, bundle revision 3/schema 2, required mod 3.1.0, loader 1.3.1, launcher >= 0.19.6, game version 3.3, and 8 advertised/available regions. The policy header and schedule identity/date checks passed. These are API metadata observations; bundle artifact validation and an actual game session are pending. Repeat this read with `reimagined-probe --inspect-ladders` after signing in.
+On 2026-10-31, the signed macOS probe read one active Hallowing Ladder and 8 advertised/available regions. During inspection the bundle advanced from revision 3 to 4/schema 2. Both downloaded archives passed descriptor/archive hashes, pinned P256/P1363 manifest signature and all 3814 file hashes in a private inspection tool. No DLL was executed; this is not yet an integrated iOS package installer. The client refused to reuse revision 3's receipt for revision 4.
+
+With revision 4 validated, the native probe reported its actual version 0.1.0. The launch-ticket endpoint returned HTTP 403, stating that launcher 0.19.7 or newer was required. Save reads without a ticket returned `ladder_ticket_invalid`; the temporary game token was revoked. No server-side character was created or changed. Native compatibility/version negotiation and an actual game session remain unverified.
 
 ## Remaining implementation
 
 - Transport-level framing/compression, verified ordinary gameplay packet lengths and actual bidirectional gameplay exchange.
 - Verified bindings to the ARM64 engine's client/server roles and packet queues.
 - Complete required environment-manifest/admission semantics and approved native-client compatibility.
-- Server Saves integration, character isolation and actual save/readback confirmation.
+- Accepted Server Saves API reads, download and serializer/layout compatibility, engine save binding, journal/new-character/progress semantics and actual server save/readback confirmation. The read-side decoder is inferred from plugin fields; local staging tests are not server synchronization.
 - End-to-end testing against a supported ladder/test environment.
 
 Maintainer discussions: [Reimagined launcher #264](https://github.com/D2R-Reimagined/reimagined-launcher/issues/264), [D2RLoader PluginSDK #5](https://github.com/D2RLoader/PluginSDK/issues/5).

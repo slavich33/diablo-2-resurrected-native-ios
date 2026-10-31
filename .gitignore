@@ -25,3 +25,6 @@ dm/android/.cxx/
 /private/
 /artifacts/
 dm/android/local.env
+
+# Local SwiftPM cache may be a symlink to an external build volume.
+/dm/online/.build
