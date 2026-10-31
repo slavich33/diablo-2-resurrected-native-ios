@@ -4,7 +4,7 @@
 
 This is an experimental native Apple client for the public Reimagined launcher API. The goal is to implement the missing client components and integrate them into the iOS port, potentially enabling iPhone users to participate in the existing Reimagined ladder.
 
-**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. Production sign-in on a physical iPhone, an authenticated ladder selection and eight returned regions have been verified; the signed-in session also survived an app restart. A native macOS probe separately verified a launch ticket for a verified signed revision-5 package, an empty server-authoritative save list, the real player lobby and game-endpoint resolution. A socket connected to the advertised game endpoint and received its initial `af 00`, sending zero bytes. The engine/save paths remain disconnected; game admission and a server character progress/save round trip have not been verified.
+**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. A physical iPhone verified all 3,814 files of the signed revision-6 package, obtained a launch ticket and a narrow token using its own Keychain session, and read the live player lobby and empty server-authoritative save list. Sign-in, authenticated region reads and session persistence were also verified. A native macOS probe separately resolved a game endpoint and received its initial `af 00`, sending zero bytes. The engine/save paths remain disconnected; game admission and a server character progress/save round trip have not been verified.
 
 Implemented:
 

@@ -22,6 +22,14 @@ request was accepted afterwards. No server character was created or changed.
 This proves ticket/list access, not a game admission, file download or saved
 character round trip.
 
+On the physical iPhone, build `1793472407` subsequently verified the complete
+signed revision-6 archive locally, obtained its own launch ticket/narrow token
+and accepted the same typed empty server-authoritative save response (200).
+The phone also read the player lobby and received 204 for its token-revocation
+request. This removes a Mac-only dependency for those API reads; per-file
+metadata, new-character registration, actual downloads and progress/save
+round trips remain unverified. See [LADDER_PACKAGES.md](LADDER_PACKAGES.md).
+
 The earlier probe used a manually supplied debug value `0.1.0` and was refused
 with 403 because the minimum was 0.19.7. The native iOS shell already declared
 `CFBundleShortVersionString=1.0`; that application version was independently

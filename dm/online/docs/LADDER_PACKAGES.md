@@ -65,3 +65,15 @@ malformed offsets and unsupported ZIP features. Lifecycle tests check narrow
 credentials, refusals, cancellation and token cleanup. A native macOS run also
 verified all 3,814 files of the real signed revision-6 package. None of those
 observations proves physical-device game admission or a progress/save reload.
+
+The device inspection subsequently passed on a physical iPhone with build
+`1793472407` (code `5d3b88a`). The phone independently verified all 3,814 files
+of revision 6 before requesting a ticket. Fresh policy, launch-ticket issuance,
+game-token issuance, save-list and player-list reads each returned HTTP 200;
+token revocation returned 204. The save list was empty and reported server
+authority. The lobby snapshot contained 452 rooms and 491 players, not a
+guarantee of later availability. Twenty offline-save files independently read
+before and after the same-bundle update matched by SHA-256. No original game
+engine, game socket or character write was started by this inspection. No
+session was exported from iPhone or copied from Mac. Production trust material,
+the archive, device captures and signed applications are not published here.
