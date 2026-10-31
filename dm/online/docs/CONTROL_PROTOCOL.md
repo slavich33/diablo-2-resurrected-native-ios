@@ -1,6 +1,14 @@
 # Control payload observations
 
-This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. It has not been validated against a live Windows game session or ladder server.
+This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. One bounded live ladder refusal now verifies the early uncompressed control-carrier path below; a live Windows session, successful admission and gameplay interoperability remain unverified.
+
+## Observed live control refusal
+
+On 31 October 2026 a developer-signed native Mac client renewed its authorized PKCE session, fetched fresh policy revision 7, verified the complete signed package (3814 files), obtained a matching native launch ticket/narrow token and resolved one public room. After the server's exact `af00` greeting, it sent one 39-byte kind 7 carrier containing an empty D2EM-v3 envelope, without character bytes, credentials, gameplay commands or claimed compatibility fingerprints. The server returned one 25-byte D0/D2RL carrier, kind 9, payload `01 00 00 00`. Both length fields and all envelope fields match the native decoder; the connection was closed and token-revocation request accepted. No save write was attempted.
+
+This verifies an early bidirectional control exchange and an explicit refusal, not successful environment validation or game admission. It does not establish all gameplay/system wire formats, compression behavior or reconnect/save handling. The response is recorded without endpoint, identity or secrets in `Fixtures/live-incomplete-environment-rejection.json`; it replays through every split boundary with distinct system/control routing.
+
+`AdmissionRejection` separately decodes kind 9 payloads as a code 1..30, three byte lengths 0..63 and the three exact byte fields. Those bounds come from the pinned core's rejection encoder/readers; only code 1 with empty fields is live-verified here. Field semantics and human-readable reason names are not invented. Generic `ControlMessage` remains a framing codec; parsing kind 8 alone still does not establish admission.
 
 ## Shared envelope and opaque messages
 
