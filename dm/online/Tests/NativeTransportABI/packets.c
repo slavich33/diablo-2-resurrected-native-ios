@@ -116,6 +116,21 @@ int main(void) {
     assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3 && kind == 0);
     assert(dm_online_packets_error(handle) == 2);
     dm_online_packets_release(handle);
+    // Native system packets retain their own channel through short-buffer
+    // retries; byte D0 inside a character chunk must not become a loader frame.
+    const uint8_t system_stream[] = {0xaf,0,0xb3,4,1,0xd0,0xaf,0xb4,0,0,0xb4,27,0,0,0,0xb0};
+    const unsigned offsets[] = {0,2,9,10,15}, sizes[] = {2,7,1,5,1};
+    const int32_t kinds[] = {4,4,1,4,4};
+    handle = dm_online_packets_open_native_94012(); assert(handle);
+    assert(dm_online_packets_append(handle, system_stream, sizeof(system_stream)) == 0);
+    for (unsigned i=0; i<5; i++) {
+        if (sizes[i]>1) assert(dm_online_packets_read(handle,out,sizes[i]-1,&kind)==-5 && kind==0);
+        assert(dm_online_packets_read(handle,out,sizeof(out),&kind)==(int32_t)sizes[i]);
+        assert(kind==kinds[i] && !memcmp(out,system_stream+offsets[i],sizes[i]));
+    }
+    assert(dm_online_packets_end(handle)==0);
+    assert(dm_online_packets_read(handle,out,sizeof(out),&kind)==-2);
+    dm_online_packets_release(handle);
     puts("C packet ABI: callbacks, verified fixed stock lengths, split input, retained retry, opaque loader routing, ordered drain and truncated EOF passed.");
     return 0;
 }

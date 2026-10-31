@@ -56,6 +56,15 @@ public func nativeStockPacketsOpen() -> UnsafeMutableRawPointer {
     )).toOpaque()
 }
 
+/// Explicit opt-in to the derived native logical system channel. Callers must
+/// independently translate/verify their transport and peer's packet formats.
+@_cdecl("dm_online_packets_open_native_94012")
+public func nativeSystemPacketsOpen() -> UnsafeMutableRawPointer {
+    Unmanaged.passRetained(NativePacketBridge(
+        decoder: GamePacketStream(nativeSystemPackets: true, resolvePacketLength: StockServerPacketLengths.resolve)
+    )).toOpaque()
+}
+
 @_cdecl("dm_online_packets_append")
 public func nativePacketsAppend(_ handle: UnsafeMutableRawPointer?, _ bytes: UnsafeRawPointer?, _ count: UInt32) -> Int32 {
     guard let handle, let bytes, count > 0 else { return -4 }
@@ -90,6 +99,7 @@ public func nativePacketsRead(_ handle: UnsafeMutableRawPointer?, _ bytes: Unsaf
             case .control(let control): bridge.pending = control.gameCarrier(); bridge.kind = 2
             case .loader(let frame): bridge.pending = try frame.gameCarrier(); bridge.kind = 3
             case .gameplay(let gameplay): bridge.pending = gameplay; bridge.kind = 1
+            case .system(let system): bridge.pending = try system.encoded(); bridge.kind = 4
             }
         } catch { bridge.record(error); return -3 }
     }

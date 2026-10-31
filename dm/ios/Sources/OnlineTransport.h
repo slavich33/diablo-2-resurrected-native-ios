@@ -30,12 +30,18 @@ void *dm_online_packets_open(dm_online_packet_length_fn resolver, void *context)
 // Remaining variables/unknown/system opcodes are terminal unsupported errors.
 // D2RL remains separate. This is NOT a raw TCP decoder or gameplay admission.
 void *dm_online_packets_open_stock_94012(void);
+// Explicit opt-in: the supported stock subset plus native logical AF/B0/B3/B4
+// system packets. B1/B2 remain unsupported. This does NOT derive a peer's TCP
+// format or prove Windows/native system-format equivalence.
+void *dm_online_packets_open_native_94012(void);
 // Append: 0 accepted; -1 backpressure (retry same bytes after draining);
 // -2 ended; -3 terminal parser error; -4 invalid args; -5 oversize input.
 int32_t dm_online_packets_append(void *handle, const void *bytes, uint32_t length);
 int32_t dm_online_packets_end(void *handle);
 // Read: >0 one whole packet, kind=1 stock gameplay, kind=2 D2RL control 7..10,
 // kind=3 other D2RL envelope (including fragments; NEVER feed it as gameplay).
+// kind=4 native system packet, only with open_native_94012; route separately to
+// DM_NET_SYSTEM, never DM_NET_GAMEPLAY. Character chunks are not save receipts.
 // Kind3 may be 65538 bytes. A stock resolver still returns at most 65536.
 // -1 need bytes; -2 clean EOF; -3 terminal error; -4 invalid args;
 // -5 output buffer too small (packet retained for retry). kind is 0 on failure.

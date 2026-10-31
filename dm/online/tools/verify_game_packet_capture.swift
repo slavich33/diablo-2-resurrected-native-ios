@@ -1,6 +1,6 @@
 // Offline replay of a trusted, private original-engine packet capture.
 // No network, authentication, engine startup or save writes are performed.
-// Build alongside ControlMessage, LoaderFrame, GamePacketStream and
+// Build alongside ControlMessage, LoaderFrame, NativeSystemPacket, GamePacketStream and
 // StockServerPacketLengths. Never publish the captured game payloads.
 import Foundation
 import CryptoKit
@@ -25,8 +25,10 @@ private struct Record: Decodable {
     }
 
     private static func check() throws {
-        guard CommandLine.arguments.count == 2 else { throw CaptureFailure.arguments }
-        let source = try FileHandle(forReadingFrom: URL(fileURLWithPath: CommandLine.arguments[1]))
+        let args = Array(CommandLine.arguments.dropFirst())
+        let nativeSystem = args.count == 2 && args[0] == "--native-system"
+        guard args.count == 1 || nativeSystem, let path = args.last else { throw CaptureFailure.arguments }
+        let source = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? source.close() }
         let maximum = 32 * 1024 * 1024
         var capture = Data()
@@ -37,10 +39,11 @@ private struct Record: Decodable {
         guard let text = String(data: capture, encoding: .utf8) else { throw CaptureFailure.record }
         let lines = text.split(separator: "\n")
         guard !lines.isEmpty, lines.count <= 10_000 else { throw CaptureFailure.size }
-        var packets: [Data] = [], previous = 0, total = 0
+        var packets: [Data] = [], directions: [String] = [], previous = 0, total = 0
         for line in lines {
             let row = try JSONDecoder().decode(Record.self, from: Data(line.utf8))
-            guard row.sequence == previous + 1, row.direction == "s2c-game", (0...255).contains(row.id),
+            guard row.sequence == previous + 1,
+                  (row.direction == "s2c-game" || (nativeSystem && row.direction == "s2c-system")), (0...255).contains(row.id),
                   (1...65_536).contains(row.length) else { throw CaptureFailure.record }
             previous = row.sequence
             let hex = Array(row.payload.utf8)
@@ -53,17 +56,24 @@ private struct Record: Decodable {
             total += packet.count
             guard total <= 8 * 1024 * 1024 else { throw CaptureFailure.size }
             packets.append(packet)
+            directions.append(row.direction)
         }
         var streamBytes = Data(); streamBytes.reserveCapacity(total)
         for packet in packets { streamBytes.append(packet) }
         let chunks = [1, 2, 3, 7, 31, 127, 512, 4096, 65_536]
         for chunk in chunks {
-            let stream = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+            let stream = GamePacketStream(nativeSystemPackets: nativeSystem, resolvePacketLength: StockServerPacketLengths.resolve)
             var read = 0
             func drain() throws {
                 while let decoded = try stream.nextPacket() {
-                    guard case .gameplay(let packet) = decoded, read < packets.count,
-                          packet == packets[read] else { throw CaptureFailure.mismatch }
+                    guard read < packets.count else { throw CaptureFailure.mismatch }
+                    let packet: Data, direction: String
+                    switch decoded {
+                    case .gameplay(let value): packet = value; direction = "s2c-game"
+                    case .system(let value): packet = try value.encoded(); direction = "s2c-system"
+                    default: throw CaptureFailure.mismatch
+                    }
+                    guard packet == packets[read], direction == directions[read] else { throw CaptureFailure.mismatch }
                     read += 1
                 }
             }
@@ -81,6 +91,7 @@ private struct Record: Decodable {
             "exactPacketComparisons": packets.count * chunks.count,
             "coveredVariableOpcodes": StockServerPacketLengths.supportedVariableOpcodes.filter(opcodes.contains).map { String(format: "0x%02x", $0) },
             "allPacketBytesAndBoundariesMatched": true, "gameAdmissionVerified": false,
+            "nativeSystemPacketsEnabled": nativeSystem,
         ]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
         FileHandle.standardOutput.write(data + Data([10]))

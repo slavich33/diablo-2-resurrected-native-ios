@@ -74,10 +74,33 @@ The original native reader for `0x67` copies `4*byte(20)` bytes starting at 22; 
 
 ```sh
 xcrun --sdk macosx swiftc -parse-as-library -O -module-name StockCaptureCheck \
-  dm/online/Sources/ReimaginedClient/{ControlMessage,LoaderFrame,GamePacketStream,StockServerPacketLengths}.swift \
+  dm/online/Sources/ReimaginedClient/{ControlMessage,LoaderFrame,NativeSystemPacket,GamePacketStream,StockServerPacketLengths}.swift \
   dm/online/tools/verify_game_packet_capture.swift -o /private/scratch/verify-capture
 /private/scratch/verify-capture /private/captures/original-engine.jsonl
 ```
+
+### Native logical system channel
+
+`NativeSystemPacket` implements the four native formats below. This is the exact ARM64 engine's logical system boundary, separately from gameplay and D2RL. It does not establish the Windows peer's system format, raw TCP lengths, compression mode or admission. In particular, do not feed raw TCP directly into this decoder.
+
+| Opcode | Total bytes | Preserved body |
+| --- | --- | --- |
+| `0xaf` | 2 | one auxiliary byte; the native consumer sets its ready flag |
+| `0xb0` | 1 | no body; the native consumer clears its ready flag |
+| `0xb3` | `3 + byte(1)` | marker at2, then0..255 character-data bytes |
+| `0xb4` | 5 | u32-le reason at1; the original consumer maps it to its UI error |
+
+The original AF producer stores `0x00af` and sends a two-byte span. The B0 producer sends a one-byte span. The original system dispatcher reads B3's length/marker at1/2 and payload at3, and reads B4's reason at1. B1/B2 are ignored by that dispatcher; their complete production lengths were not independently derived, so this codec refuses them rather than guessing.
+
+The exact original ARM64 B3 producer at `main+0x5d6b80` sends at most255 data bytes per chunk with a three-byte header, marks the first chunk of each segment with1 and later chunks with0, then emits `b3 00 00`. The independent bounded reference executes that original function on synthetic bytes, replacing only generic copy/fill, the outgoing queue boundary and the final resource-release helper. It exercises1034 cases: all lengths0..1025, larger boundaries through65536, multiple segments, empty vectors and disabled sends. It invokes no OS, network or game entry point and does not read/write character saves.
+
+```sh
+python dm/online/tools/verify_native_system_packets.py /path/to/original/ExeFS/main \
+  --output /private/scratch/system-reference.jsonl
+/private/scratch/verify-capture --native-system /private/scratch/system-reference.jsonl
+```
+
+The output file must not already exist. `--native-system` additionally verifies system/game direction at every returned packet, through the same nine chunk sizes. Generic/stock decoder entry points retain their old behavior; only explicit native opt-in emits `.system` / C kind4. A character transfer terminator is not a durable server-save receipt or an accepted gameplay-progress upload. No automatic save mounting, game admission or packet-pump activation is added.
 
 The decoder preserves order, accepts coalesced reads, caps input storage at 256 KiB and individual packets at 64 KiB, and exposes one packet per poll. A full input buffer rejects the entire append for retry after draining. Unknown packet IDs, invalid lengths and truncated EOF terminate that decoder; it never scans gameplay bytes for the next `D2RL` magic. These caps are local memory policies.
 

@@ -17,6 +17,7 @@ public enum DecodedGamePacket {
     case control(ControlMessage)
     case loader(LoaderFrame)
     case gameplay(Data)
+    case system(NativeSystemPacket)
 }
 
 /// Single-consumer incremental decoder at the *game-packet* layer. Feed bytes
@@ -30,13 +31,15 @@ public final class GamePacketStream {
     public typealias LengthResolver = (Data) -> GamePacketLength
 
     private let resolve: LengthResolver
+    private let nativeSystemPackets: Bool
     private var storage = Data()
     private var offset = 0
     private var ended = false
     private var failure: Error?
 
-    public init(resolvePacketLength: @escaping LengthResolver) {
+    public init(nativeSystemPackets: Bool = false, resolvePacketLength: @escaping LengthResolver) {
         resolve = resolvePacketLength
+        self.nativeSystemPackets = nativeSystemPackets
     }
 
     public var bufferedBytes: Int { storage.count - offset }
@@ -65,12 +68,13 @@ public final class GamePacketStream {
         do {
             let header = Data(storage.dropFirst(offset).prefix(Self.maximumHeaderBytes))
             let control = header[0] == 0xd0
+            let system = nativeSystemPackets && (0xaf...0xb4).contains(header[0])
             let length: Int
             if control {
                 guard header.count >= 3 else { return try incomplete() }
                 length = try LoaderFrame.carrierLength(prefix: header)
             } else {
-                switch resolve(header) {
+                switch system ? NativeSystemPacket.resolve(header) : resolve(header) {
                 case .length(let count): length = count
                 case .needMore:
                     // The resolver sees at most 512 bytes. Asking for more
@@ -89,7 +93,8 @@ public final class GamePacketStream {
                 let frame = try LoaderFrame.decodeGameCarrier(bytes)
                 if (7...10).contains(frame.kind) { packet = .control(try ControlMessage.decodeGameCarrier(bytes)) }
                 else { packet = .loader(frame) }
-            } else { packet = .gameplay(bytes) }
+            } else if system { packet = .system(try NativeSystemPacket.decode(bytes)) }
+            else { packet = .gameplay(bytes) }
             offset += length
             if offset == storage.count { storage.removeAll(keepingCapacity: false); offset = 0 }
             return packet

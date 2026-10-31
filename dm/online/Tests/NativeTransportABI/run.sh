@@ -12,6 +12,7 @@ xcrun --sdk macosx clang -isysroot "$D2R_ABI_SDK" -Wall -Wextra -Werror -I "$D2R
 xcrun --sdk macosx swiftc -sdk "$D2R_ABI_SDK" -parse-as-library -module-name NativePacketCheck \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/ControlMessage.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/LoaderFrame.swift" \
+ "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/NativeSystemPacket.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/GamePacketStream.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/StockServerPacketLengths.swift" \
  "$D2R_ABI_REPO_ROOT/dm/online/Sources/ReimaginedClient/GamePacketBridge.swift" \
