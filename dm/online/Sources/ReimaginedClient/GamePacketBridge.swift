@@ -29,6 +29,11 @@ private final class NativePacketBridge {
             case .truncatedPacket: error = 3
             default: error = 2
             }
+        } else if let frameError = failure as? LoaderFrameError {
+            switch frameError {
+            case .invalidSize, .lengthMismatch, .carrierTooLarge: error = 2
+            default: error = 4
+            }
         } else { error = 4 }
     }
 }
@@ -71,6 +76,7 @@ public func nativePacketsRead(_ handle: UnsafeMutableRawPointer?, _ bytes: Unsaf
             guard let packet = try bridge.decoder.nextPacket() else { return bridge.ended ? -2 : -1 }
             switch packet {
             case .control(let control): bridge.pending = control.gameCarrier(); bridge.kind = 2
+            case .loader(let frame): bridge.pending = try frame.gameCarrier(); bridge.kind = 3
             case .gameplay(let gameplay): bridge.pending = gameplay; bridge.kind = 1
             }
         } catch { bridge.record(error); return -3 }

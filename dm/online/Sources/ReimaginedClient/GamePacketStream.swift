@@ -14,13 +14,14 @@ public enum GamePacketLength {
 
 public enum DecodedGamePacket {
     case control(ControlMessage)
+    case loader(LoaderFrame)
     case gameplay(Data)
 }
 
 /// Single-consumer incremental decoder at the *game-packet* layer. Feed bytes
 /// only after any TCP transport framing/compression has been removed. A stock
 /// packet-size resolver is required; unknown packets are never skipped/scanned
-/// for magic. Control parsing does not implement or grant environment admission.
+/// for magic. Loader/control parsing does not implement or grant environment admission.
 public final class GamePacketStream {
     public static let maximumPacketBytes = 65_536
     public static let maximumBufferedBytes = 262_144
@@ -66,8 +67,7 @@ public final class GamePacketStream {
             let length: Int
             if control {
                 guard header.count >= 3 else { return try incomplete() }
-                length = 3 + Int(header[1]) + (Int(header[2]) << 8)
-                guard (21...245).contains(length) else { throw GamePacketStreamError.invalidLength }
+                length = try LoaderFrame.carrierLength(prefix: header)
             } else {
                 switch resolve(header) {
                 case .length(let count): length = count
@@ -82,7 +82,12 @@ public final class GamePacketStream {
             }
             guard bufferedBytes >= length else { return try incomplete() }
             let bytes = storage.subdata(in: offset..<(offset + length))
-            let packet: DecodedGamePacket = control ? .control(try ControlMessage.decodeGameCarrier(bytes)) : .gameplay(bytes)
+            let packet: DecodedGamePacket
+            if control {
+                let frame = try LoaderFrame.decodeGameCarrier(bytes)
+                if (7...10).contains(frame.kind) { packet = .control(try ControlMessage.decodeGameCarrier(bytes)) }
+                else { packet = .loader(frame) }
+            } else { packet = .gameplay(bytes) }
             offset += length
             if offset == storage.count { storage.removeAll(keepingCapacity: false); offset = 0 }
             return packet
