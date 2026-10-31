@@ -6,21 +6,36 @@ must name the requested ladder. HTTP refusal is returned to the caller without
 credential substitution or retry. The launcher's long-lived token is not used
 for save reads.
 
-The route, header and metadata field names were observed in the signed ladder
-package's Server Saves plugin. The native decoder requires an object with
-`serverAuthoritative` and `files`, with per-file `fileName`, `sha256`, `version`
-and `byteCount`; optional metadata includes `characterName`, `corrupt` and
-`lastSavedAtUtc`. This inferred response schema has **not yet been checked
-against an accepted native session**. Tests use synthetic fixtures. An absent
-authority field or an incompatible response must fail rather than imply that
-local progress may be uploaded.
+The native list decoder requires `ladderId`, `serverAuthoritative` and `saves`.
+The returned ladder must match the requested ladder and the snapshot's scope
+before any staging. An accepted live native response confirmed this root shape
+with an empty `saves` array. The old inferred `files` key was incorrect and is
+not accepted as a fallback. An absent authority field or incompatible response
+fails rather than implying local progress may be uploaded.
 
-On 31 October 2026 a signed native macOS probe, reporting its real version
-0.1.0, was refused a launch ticket with HTTP 403: the ladder required launcher
-0.19.7 or newer. Save reads without a ticket were refused with
-`ladder_ticket_invalid`. No native server-character download/upload or game
-admission is claimed. Native compatibility/version negotiation remains to be
-agreed and tested; changing a version string alone is not interoperability.
+On 31 October 2026 a signed native macOS probe with the actual native shell
+application version `1.0` obtained a launch ticket for the freshly verified
+revision-5 package. `GET /characters/saves/health` returned 204 and the public
+native manifest reader accepted `GET /characters/saves` with 200, the expected
+ladder, `serverAuthoritative=true` and zero files. A narrow game-token revoke
+request was accepted afterwards. No server character was created or changed.
+This proves ticket/list access, not a game admission, file download or saved
+character round trip.
+
+The earlier probe used a manually supplied debug value `0.1.0` and was refused
+with 403 because the minimum was 0.19.7. The native iOS shell already declared
+`CFBundleShortVersionString=1.0`; that application version was independently
+read from the built app. `NativeClientIdentity` now derives the version from
+the calling app's metadata, and the default ticket overload uses it. Requests
+identify the native platform and distinguish application version from the API
+component version. An unversioned executable cannot use that overload. No
+Windows platform, binary hash, plugin behavior or game compatibility is claimed
+by the application version or returned ticket.
+
+Per-file `fileName`, `sha256`, `version` and `byteCount`, with optional
+`characterName`, `corrupt` and `lastSavedAtUtc`, are still inferred from plugin
+inspection and synthetic fixtures. An empty live list does not validate entry
+fields, corrupt-file handling or individual save downloads.
 
 `downloadServerSave` reads raw bytes from `GET /characters/saves/{fileName}`
 with the ladder query and the same narrow credentials. Static inspection found
@@ -29,8 +44,8 @@ The native method checks the manifest's exact byte count and SHA-256. A newer
 server version fails verification instead of overwriting an existing snapshot.
 The native HTTP/download limit is 8 MiB per file; the decoder's larger local
 staging limit does not bypass it. Filename percent signs, Unicode and fragment
-characters are escaped as a single path component. The accepted native live
-download remains unverified while ticket compatibility is unresolved.
+characters are escaped as a single path component. A native live download of
+an actual file remains unverified; the accepted account list was empty.
 
 `VerifiedServerSave` verifies byte count and SHA-256 before staging.
 `ServerSaveSnapshot.stage` commits a complete set into a new isolated account

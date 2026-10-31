@@ -10,8 +10,14 @@ public enum ServerSaveLayout { case serverFlat, switchVersion105 }
 /// Read-side contract observed in the Server Saves plugin. Live native access
 /// still requires an accepted launch ticket; this is not a local-save importer.
 public struct ServerSaveManifest: Decodable {
+    public let ladderID: UUID
     public let serverAuthoritative: Bool
     public let files: [ServerSaveMetadata]
+
+    enum CodingKeys: String, CodingKey {
+        case ladderID = "ladderId", serverAuthoritative
+        case files = "saves"
+    }
 
     public func validate() throws {
         guard files.count <= 1024 else { throw ServerSaveError.sizeLimit }
@@ -78,6 +84,7 @@ public enum ServerSaveSnapshot {
                              scope: LadderSaveScope, root: URL,
                              layout: ServerSaveLayout = .serverFlat) throws -> URL {
         try manifest.validate()
+        guard manifest.ladderID == scope.ladderID else { throw ServerSaveError.wrongLadder }
         guard files.count == manifest.files.count else { throw ServerSaveError.invalidManifest }
         let expected = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.fileName, $0) })
         var seen = Set<String>()

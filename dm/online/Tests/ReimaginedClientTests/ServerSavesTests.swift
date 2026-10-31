@@ -15,7 +15,7 @@ final class ServerSavesTests: XCTestCase {
     private final class Transport: HTTPTransport {
         var requests: [URLRequest] = []
         var status = 200
-        var body = Data("{\"serverAuthoritative\":true,\"files\":[]}".utf8)
+        var body = Data()
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             requests.append(request)
             return (body, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
@@ -24,6 +24,7 @@ final class ServerSavesTests: XCTestCase {
 
     func testManifestReadUsesNarrowCredentialsAndStopsOnRefusal() async throws {
         let ladder = UUID(), transport = Transport()
+        transport.body = Data("{\"ladderId\":\"\(ladder)\",\"serverAuthoritative\":true,\"saves\":[]}".utf8)
         let api = try ReimaginedAPIClient(transport: transport)
         let token = GameSessionToken(accessToken: "fixture-game-token", expiresAtUtc: now.addingTimeInterval(60))
         let ticket = LadderLaunchTicket(launchTicket: "fixture-ticket", expiresAtUtc: now.addingTimeInterval(60),
@@ -58,11 +59,11 @@ final class ServerSavesTests: XCTestCase {
         try original.write(to: offline)
         let scope = try LadderSaveScope(ladderID: UUID(), accountID: "fixture-account")
         let entry = metadata(), verified = try VerifiedServerSave(metadata: entry, bytes: bytes)
-        let manifest = ServerSaveManifest(serverAuthoritative: true, files: [entry])
+        let manifest = ServerSaveManifest(ladderID: scope.ladderID, serverAuthoritative: true, files: [entry])
         let first = try ServerSaveSnapshot.stage([verified], manifest: manifest, scope: scope, root: root)
         XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent(entry.fileName)), bytes)
         XCTAssertEqual(try Data(contentsOf: offline), original)
-        let newer = ServerSaveManifest(serverAuthoritative: true, files: [metadata(version: 2)])
+        let newer = ServerSaveManifest(ladderID: scope.ladderID, serverAuthoritative: true, files: [metadata(version: 2)])
         XCTAssertThrowsError(try ServerSaveSnapshot.stage([verified], manifest: newer, scope: scope, root: root))
         XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent(entry.fileName)), bytes)
         XCTAssertEqual(try Data(contentsOf: offline), original)
@@ -104,7 +105,7 @@ final class ServerSavesTests: XCTestCase {
         for name in ["../escape.d2s", "sub/name.d2s", "sub\\name.d2s", "C:save.d2s", ".hidden.d2s", "file.d2s ", "file\n.d2s", "file.txt", "file.d2s/other"] {
             XCTAssertThrowsError(try metadata(name: name).validate(), name)
         }
-        let collision = ServerSaveManifest(serverAuthoritative: true, files: [metadata(), metadata(name: "fixture.D2S")])
+        let collision = ServerSaveManifest(ladderID: UUID(), serverAuthoritative: true, files: [metadata(), metadata(name: "fixture.D2S")])
         XCTAssertThrowsError(try collision.validate())
         // Authority is mandatory: do not default an absent/changed field to a
         // mode that would permit uploads. This client contains no upload API.
@@ -125,13 +126,35 @@ final class ServerSavesTests: XCTestCase {
         }
         let character = try file("Fixture.D2S", [0xaa55aa55, 105, 16, 0])
         let stash = try file("FixtureStash.d2i", [0xaa55aa55, 2, 105])
-        let manifest = ServerSaveManifest(serverAuthoritative: true, files: [character.metadata, stash.metadata])
+        let manifest = ServerSaveManifest(ladderID: scope.ladderID, serverAuthoritative: true, files: [character.metadata, stash.metadata])
         let staged = try ServerSaveSnapshot.stage([character, stash], manifest: manifest, scope: scope, root: root, layout: .switchVersion105)
         XCTAssertEqual(try Data(contentsOf: staged.appendingPathComponent("Fixture/Fixture.d2s")), character.bytes)
         XCTAssertEqual(try Data(contentsOf: staged.appendingPathComponent("FixtureStash/FixtureStash.d2i")), stash.bytes)
         let wrongVersion = try file("Future.d2s", [0xaa55aa55, 106, 16, 0])
-        let changed = ServerSaveManifest(serverAuthoritative: true, files: [wrongVersion.metadata])
+        let changed = ServerSaveManifest(ladderID: scope.ladderID, serverAuthoritative: true, files: [wrongVersion.metadata])
         XCTAssertThrowsError(try ServerSaveSnapshot.stage([wrongVersion], manifest: changed, scope: scope, root: root, layout: .switchVersion105))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staged.deletingLastPathComponent().path), [staged.lastPathComponent])
+    }
+
+    func testLiveManifestHeaderIsBoundToRequestedLadderAndSnapshotScope() async throws {
+        let ladder = UUID(), other = UUID(), transport = Transport()
+        let api = try ReimaginedAPIClient(transport: transport)
+        let token = GameSessionToken(accessToken: "fixture-game", expiresAtUtc: now.addingTimeInterval(60))
+        let ticket = LadderLaunchTicket(launchTicket: "fixture-ticket", expiresAtUtc: now.addingTimeInterval(60),
+            ladderId: ladder, bundleId: UUID(), bundleRevision: 5)
+        transport.body = Data("{\"ladderId\":\"\(other)\",\"serverAuthoritative\":true,\"saves\":[]}".utf8)
+        do { _ = try await api.serverSaveManifest(ladderID: ladder, gameToken: token, ticket: ticket, now: now); XCTFail("Wrong response ladder accepted") }
+        catch { XCTAssertEqual(error as? ServerSaveError, .wrongLadder) }
+        let manifest = try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: transport.body)
+        let scope = try LadderSaveScope(ladderID: ladder, accountID: "fixture-account")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        XCTAssertThrowsError(try ServerSaveSnapshot.stage([], manifest: manifest, scope: scope, root: root)) {
+            XCTAssertEqual($0 as? ServerSaveError, .wrongLadder)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        for body in ["{\"serverAuthoritative\":true,\"saves\":[]}",
+                     "{\"ladderId\":\"\(ladder)\",\"serverAuthoritative\":true,\"files\":[]}"] {
+            XCTAssertThrowsError(try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: Data(body.utf8)))
+        }
     }
 }

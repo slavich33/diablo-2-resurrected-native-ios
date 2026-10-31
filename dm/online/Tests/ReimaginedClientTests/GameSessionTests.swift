@@ -101,4 +101,30 @@ final class GameSessionTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: another.appendingPathComponent("ReimaginedOnline"), withDestinationURL: external)
         XCTAssertThrowsError(try scope.prepareDirectory(root: another))
     }
+
+    func testNativeTicketUsesApplicationMetadataAndIdentifiesTheNativePlatform() async throws {
+        let transport = Transport(), saved = try session()
+        let identity = NativeClientIdentity(applicationVersion: "1.2.3", platform: .iOS)
+        let api = try ReimaginedAPIClient(transport: transport, identity: identity)
+        let ladder = UUID(), bundleID = UUID()
+        let bundle = LadderBundleDescriptor(id: bundleID, ladderId: ladder, revision: 4, schemaVersion: 2,
+            status: "Active", artifactSha256: String(repeating: "a", count: 64), manifestSha256: "",
+            manifestSignature: "", signingKeyId: "fixture", artifactSizeBytes: 0,
+            compatibility: BundleCompatibility(minimumLauncherVersion: "0.19.7", requiredD2RLoaderVersion: "1.3.1",
+                requiredD2RLoaderSha256: "", requiredD2RCoreSha256: "", requiredModVersion: "3.1.0", supportedGameVersion: "3.3"),
+            downloadPath: "fixture")
+        transport.bytes = Data("{\"launchTicket\":\"test-ticket\",\"expiresAtUtc\":\"2027-01-01T00:00:00Z\",\"ladderId\":\"\(ladder)\",\"bundleId\":\"\(bundleID)\",\"bundleRevision\":4}".utf8)
+        _ = try await api.launchTicket(ladderID: ladder, bundle: bundle, session: saved, now: now)
+        let request = try XCTUnwrap(transport.requests.last)
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as! [String:Any]
+        XCTAssertEqual(body["launcherVersion"] as? String, "1.2.3")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "D2RMobile-Reimagined/0.1 (native-iOS; app/1.2.3)")
+        for version in [nil, "", "1..2", "1.2-native", "1.2\r\nBad: x", "2147483648.1"] as [String?] {
+            let unversioned = try ReimaginedAPIClient(transport: transport,
+                identity: NativeClientIdentity(applicationVersion: version, platform: .macOS))
+            do { _ = try await unversioned.launchTicket(ladderID: ladder, bundle: bundle, session: saved, now: now); XCTFail("Unversioned ticket sent") }
+            catch { XCTAssertEqual(error as? ClientError, .invalidResponse) }
+        }
+        XCTAssertEqual(transport.requests.count, 1)
+    }
 }

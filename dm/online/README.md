@@ -4,7 +4,7 @@
 
 This is an experimental native Apple client for the public Reimagined launcher API. The goal is to implement the missing client components and integrate them into the iOS port, potentially enabling iPhone users to participate in the existing Reimagined ladder.
 
-**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. The gameplay network and save paths remain disconnected. Production PKCE sign-in and authenticated API reads have been verified with the native macOS probe. No iPhone device login, ladder launch ticket, server character synchronization, or game connection has been verified.
+**This module does not enable multiplayer or ladder gameplay.** The iOS shell includes the module and a native account/ladder/region screen. The gameplay network and save paths remain disconnected. Production PKCE sign-in, authenticated API reads, a launch ticket for a verified signed revision-5 package and an empty server-authoritative save list have been verified with the native macOS probe. No iPhone device login, server character progress/save round trip or game connection has been verified.
 
 Implemented:
 
@@ -19,6 +19,8 @@ Implemented:
 - Native TCP byte transport using Network.framework, with nonblocking C polling exports for a future verified engine adapter. Receive/send queues are bounded; backpressure, peer EOF and errors are observable. It does not implement D2RLoader packet framing or admission.
 - Opt-in ARM64 engine queue/lifecycle gates, pending/active/failed binding state and argument-preserving entry gates. A one-shot prepared startup transition applies the identified remote-client mode/address/port; incomplete preparation returns false before local startup. A bounded native loopback fixture elicited the original join/character-data commands. Failed sessions never resume local queues; unbound methods remain available. Full launch context, production transport and admission remain incomplete.
 - Narrow game-session token issuance/revocation and ladder launch-ticket request contracts, including expiry and bundle-identity checks. No automatic fallback to a launcher token.
+- Native platform identity and an application-version ticket overload using the app's actual `CFBundleShortVersionString`. The old manual debug value was not the native shell's version; an unversioned executable cannot use the new overload.
+- Native read-only Server Saves list decoding with the live `ladderId`/`serverAuthoritative`/`saves` root contract and ladder checks before staging. Live verification covered an empty account list, not individual files or saved progress.
 - Per-account/per-ladder local save directory preparation that does not copy, move, upload or enumerate characters. The live game's `DM_SAVE` mount is not switched.
 - A macOS probe using an identifiable native-client User-Agent, read-only by default.
 

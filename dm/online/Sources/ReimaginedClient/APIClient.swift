@@ -41,15 +41,18 @@ public final class SessionTransport: HTTPTransport {
 public final class ReimaginedAPIClient {
     public static let production = URL(string: "https://api.d2r-reimagined.com/")!
     public let origin: URL
+    public let identity: NativeClientIdentity
     private let transport: HTTPTransport
 
-    public init(origin: URL = ReimaginedAPIClient.production, transport: HTTPTransport = SessionTransport()) throws {
+    public init(origin: URL = ReimaginedAPIClient.production, transport: HTTPTransport = SessionTransport(),
+                identity: NativeClientIdentity = .current) throws {
         guard origin.scheme == "https", origin.host != nil, origin.user == nil, origin.password == nil,
               origin.query == nil, origin.fragment == nil, origin.path == "/" || origin.path.isEmpty else {
             throw ClientError.invalidOrigin
         }
         self.origin = origin
         self.transport = transport
+        self.identity = identity
     }
 
     public func schedule(accessToken: String? = nil) async throws -> LadderSchedule {
@@ -92,6 +95,7 @@ public final class ReimaginedAPIClient {
             query: [URLQueryItem(name: "ladderId", value: ladderID.uuidString.lowercased())],
             launchTicket: ticket.launchTicket)
         let manifest = try ReimaginedJSON.decoder().decode(ServerSaveManifest.self, from: bytes)
+        guard manifest.ladderID == ladderID else { throw ServerSaveError.wrongLadder }
         try manifest.validate()
         return manifest
     }
@@ -124,6 +128,15 @@ public final class ReimaginedAPIClient {
 
     /// Transport contract only: a returned ticket does not validate the bundle
     /// or admit the native engine. Call only after complete bundle validation.
+    public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor,
+                             session: LauncherSession, now: Date = Date()) async throws -> LadderLaunchTicket {
+        guard let version = identity.applicationVersion else { throw ClientError.invalidResponse }
+        return try await launchTicket(ladderID: ladderID, bundle: bundle, launcherVersion: version,
+                                      session: session, now: now)
+    }
+
+    /// Explicit version form for protocol fixtures/other launcher integrations.
+    /// Native applications should use the metadata-derived overload above.
     public func launchTicket(ladderID: UUID, bundle: LadderBundleDescriptor, launcherVersion: String,
                              session: LauncherSession, now: Date = Date()) async throws -> LadderLaunchTicket {
         guard bundle.ladderId == ladderID, bundle.revision > 0,
@@ -191,7 +204,7 @@ public final class ReimaginedAPIClient {
         request.httpBody = body
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("D2RMobile-Reimagined/0.1", forHTTPHeaderField: "User-Agent")
+        request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
         if let body, !body.isEmpty { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let launchTicket { request.setValue(launchTicket, forHTTPHeaderField: "X-Ladder-Launch-Ticket") }

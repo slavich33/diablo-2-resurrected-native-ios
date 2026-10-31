@@ -83,7 +83,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.absoluteString, "https://api.d2r-reimagined.com/ladders/schedule")
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "D2RMobile-Reimagined/0.1")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), NativeClientIdentity.current.userAgent)
     }
 
     func testPolicyRequiresMatchingVersionDatesAndIdentity() async throws {
