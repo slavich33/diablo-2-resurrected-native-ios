@@ -51,6 +51,16 @@ def swift_sizes(path):
     return sizes
 
 
+def supported_variables(path):
+    match = re.search(r"supportedVariableOpcodes: \[UInt8\] = \[([^\]]*)\]", path.read_text())
+    if not match or not re.fullmatch(r"[0-9a-fx,\s]+", match.group(1)):
+        raise ValueError("Swift supported-variable declaration missing")
+    values = [int(value.strip(), 16) for value in match.group(1).split(',') if value.strip()]
+    if len(values) != len(set(values)):
+        raise ValueError("Duplicate variable declaration")
+    return set(values)
+
+
 def windows_sizes(path):
     if not 64 <= path.stat().st_size <= 512 * 1024 * 1024:
         raise ValueError("Windows reference size refused")
@@ -78,13 +88,20 @@ def verify(main, source, windows=None):
         raise ValueError("Invalid packet descriptor")
     if windows is not None and windows_sizes(windows) != actual:
         raise ValueError("Independent Windows metadata differs")
+    supported = supported_variables(source)
+    variable = {i for i, length in enumerate(actual) if length == -1}
+    if not supported <= variable:
+        raise ValueError("Supported-variable declaration differs from descriptors")
     return {
         "originalNSOVerified": proof["originalInputVerified"],
         "moduleID": proof["moduleID"],
         "swiftMetadataSHA256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "entriesCompared": len(actual),
         "fixedLengthsVerified": sum(length > 0 for length in actual),
-        "variableIDsStillUnsupported": [f"0x{i:02x}" for i, length in enumerate(actual) if length == -1],
+        "variableDescriptorCount": len(variable),
+        "implementedVariableIDs": [f"0x{i:02x}" for i in sorted(supported)],
+        "variableRulesVerifiedByMetadataAlone": False,
+        "variableIDsStillUnsupported": [f"0x{i:02x}" for i in sorted(variable - supported)],
         "invalidZeroCount": actual.count(0),
         "independentWindowsMetadataMatched": windows is not None,
         "gameCodeExecuted": False,

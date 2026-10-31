@@ -42,9 +42,9 @@ This does not specify transport-level framing/compression, ordinary gameplay pac
 
 ## Incremental decoding and the native polling boundary
 
-`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. Its packet-length resolver must be independently verified. The original callback tests use synthetic stock packets; `StockServerPacketLengths` additionally supplies the 126 fixed packet lengths from the supported ARM64 engine. All 175 descriptors (including 23 variable and 26 invalid entries) independently match the pinned Windows reference. The variable entries remain unsupported; they are not sized from a TCP read or a legacy game's table. System-channel opcodes beginning at `0xaf` are outside this table. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
+`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. Its packet-length resolver must be independently verified. The original callback tests use synthetic stock packets; `StockServerPacketLengths` additionally supplies the 126 fixed packet lengths from the supported ARM64 engine. All 175 descriptors (including 23 variable and 26 invalid entries) independently match the pinned Windows reference. Eight variable formats now have separate native-reader and original-engine capture evidence below; 15 remain unsupported. No packet is sized from a TCP read or copied from a legacy game's table. System-channel opcodes beginning at `0xaf` are outside this table. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
 
-`dm_online_packets_open_stock_94012()` exposes those fixed sizes without calling guest code. It preserves existing D2RL routing, bounded buffering, short-output retry and terminal errors. It refuses a variable/invalid/system packet before any later carrier can be interpreted; the generic callback entry point remains available for a future complete verified resolver. To recheck the protocol metadata against owned inputs without executing any game function:
+`dm_online_packets_open_stock_94012()` exposes the supported fixed and variable sizes without calling guest code. It preserves D2RL routing, bounded buffering, short-output retry and terminal errors. It refuses an unimplemented variable/invalid/system opcode before any later carrier can be interpreted. Malformed declared lengths are terminal `invalidLength`, separately from an unsupported opcode. Generic C callbacks return -2 for an invalid length, -1 for unsupported, 0 for more header and positive lengths for complete sizing. To recheck the protocol metadata against owned inputs without executing any game function:
 
 ```sh
 python dm/online/tools/verify_stock_lengths.py /path/to/original/ExeFS/main \
@@ -52,6 +52,32 @@ python dm/online/tools/verify_stock_lengths.py /path/to/original/ExeFS/main \
 ```
 
 The Windows argument is optional and accepts only the independently pinned image hash. The tool pins the complete ARM64 input, compares every Swift descriptor, and rejects mismatches. This proves fixed-length metadata, not variable formats, system routing, transport framing/compression or admission. Tests cover real fixed lengths at every split boundary (including 511/512-byte packets with embedded loader magic), mixed stock/control order, truncated EOF and unsupported packets; the independent C harness also checks the new entry point and retained short-buffer retry.
+
+### Supported native variable formats
+
+These rules refer to complete logical game packets, not socket records. Offsets are zero-based; `u16-le(1)` includes the opcode in its total. Minimums reject a size shorter than the native reader's required header. This is framing validation, not full gameplay-body validation.
+
+| Opcode | Total bytes | Required header / accepted bounds |
+| --- | --- | --- |
+| `0x5b` | `u16-le(1)` | total >= 96; fixed reader reaches byte 94, terminated tail starts at 95 |
+| `0x67` | `22 + 4 * byte(20)` | need 21 bytes to determine size |
+| `0x94` | `6 + 3 * byte(1)` | need 2 bytes to determine size |
+| `0x9c` | `byte(2)` | 8..252, matching the native copy guard |
+| `0x9d` | `byte(2)` | 13..255 |
+| `0xa8` | `byte(2)` | 9..255; native state-add differs from legacy byte6 |
+| `0xaa` | `byte(6)` | 9..255 |
+| `0xac` | `byte(12)` | 13..255 |
+
+The original native reader for `0x67` copies `4*byte(20)` bytes starting at 22; `0x94` iterates three-byte entries after its six-byte header. The state readers calculate bit budgets from the indicated byte length after their nine/thirteen-byte headers. These reader observations were checked against actual original-engine complete-packet boundaries: an isolated offline capture of 246 packets, a separate 233-packet holdout collected after implementing the rules, then 353 packets from scripted movement/actions. All 832 packets (including all eight variable forms) replayed exactly through chunks of 1, 2, 3, 7, 31, 127, 512, 4096 and 65536 bytes, for 7488 byte-exact packet comparisons. The action run produced no additional unimplemented variable format. A changed declared boundary was independently rejected. This is native-format evidence; it does not prove Windows variable-format equivalence, live ladder transport or admission. Missing Mac graphics libraries in these diagnostic runs also prevent using them as rendering/FPS evidence.
+
+`tools/verify_game_packet_capture.swift` consumes a trusted private JSONL capture with `sequence`, `direction`=`s2c-game`, `id`, `length` and hex `payload`. It validates reference records before independently concatenating, chunking, decoding and comparing every packet byte/boundary. It caps input at 32 MiB / 10000 records / 8 MiB decoded bytes and never prints payloads. An arbitrary JSON file does not prove original-engine provenance. Do not publish captures, character data or game resources. Build and run the verifier on owned private observations:
+
+```sh
+xcrun --sdk macosx swiftc -parse-as-library -O -module-name StockCaptureCheck \
+  dm/online/Sources/ReimaginedClient/{ControlMessage,LoaderFrame,GamePacketStream,StockServerPacketLengths}.swift \
+  dm/online/tools/verify_game_packet_capture.swift -o /private/scratch/verify-capture
+/private/scratch/verify-capture /private/captures/original-engine.jsonl
+```
 
 The decoder preserves order, accepts coalesced reads, caps input storage at 256 KiB and individual packets at 64 KiB, and exposes one packet per poll. A full input buffer rejects the entire append for retry after draining. Unknown packet IDs, invalid lengths and truncated EOF terminate that decoder; it never scans gameplay bytes for the next `D2RL` magic. These caps are local memory policies.
 
@@ -86,7 +112,7 @@ Malformed-length cases and a full 65536-byte fragment/assembly check are also co
 
 The additional shared-envelope decoder and oversized client-command sender were evaluated offline in the same bounded reference model: 1030 frame cases (all 256 kind values and payload boundaries) and 1024 command cases (all 256 entry-count values for each of the four forms). The independently compiled native Swift codec matched all 2054 cases, including acceptance/rejection and actual sender-queue bytes. These checks substitute only generic allocation/copy/free, uncontended locks and the observed queue boundary; they do not execute a DLL entry point, Windows API, game process or remote server. The native sender sequence is supplied as a valid nonzero counter value, as required by the receiver.
 
-`Fixtures/loader-frames-reference.json` retains 30 synthetic reference cases, including rejected inputs; the Swift suite checks them and stream/assembly failure cases. The independent C test additionally covers opaque fragment routing and the 65538-byte carrier through split input and output-buffer retry. The full Swift suite now has 51 passing tests. Repeat the published oracle cases with:
+`Fixtures/loader-frames-reference.json` retains 30 synthetic reference cases, including rejected inputs; the Swift suite checks them and stream/assembly failure cases. The independent C test additionally covers opaque fragment routing and the 65538-byte carrier through split input and output-buffer retry. At that codec checkpoint the Swift suite had 51 passing tests; current totals are recorded in the module README. Repeat the published oracle cases with:
 
 ```sh
 python tools/verify_loader_frames.py --dll /path/to/your/D2RCore.dll

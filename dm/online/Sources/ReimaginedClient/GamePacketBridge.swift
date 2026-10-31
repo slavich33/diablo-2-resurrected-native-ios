@@ -18,7 +18,8 @@ private final class NativePacketBridge {
         decoder = GamePacketStream { header in
             let count = header.withUnsafeBytes { resolve(context, $0.bindMemory(to: UInt8.self).baseAddress, UInt32(header.count)) }
             if count > 0 { return .length(Int(count)) }
-            return count == 0 ? .needMore : .unsupported
+            if count == 0 { return .needMore }
+            return count == -2 ? .invalid : .unsupported
         }
     }
 
@@ -46,8 +47,8 @@ public func nativePacketsOpen(_ resolve: NativePacketLengthResolver?, _ context:
     return Unmanaged.passRetained(NativePacketBridge(resolve: resolve, context: context)).toOpaque()
 }
 
-/// Fixed stock game packets only, after transport decoding. Unknown/variable
-/// packets fail visibly; this does not enable raw TCP, system routing or admission.
+/// Supported exact-build game packets, after transport decoding. Unverified
+/// formats fail visibly; this does not enable raw TCP, system routing or admission.
 @_cdecl("dm_online_packets_open_stock_94012")
 public func nativeStockPacketsOpen() -> UnsafeMutableRawPointer {
     Unmanaged.passRetained(NativePacketBridge(

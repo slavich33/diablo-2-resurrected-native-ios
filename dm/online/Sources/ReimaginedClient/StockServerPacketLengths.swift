@@ -2,7 +2,8 @@ import Foundation
 
 /// Server-to-client game-packet metadata for the supported 3.3.94012 engine.
 /// These are packet lengths after transport decoding, not TCP record lengths.
-/// Variable packets and the separate system channel still require verified rules.
+/// Eight variable formats are checked against native header readers and bounded
+/// original-engine captures. Other variables and the system channel are separate.
 public enum StockServerPacketLengths {
     public enum Descriptor: Equatable {
         case fixed(Int), variable, unsupported
@@ -25,6 +26,8 @@ public enum StockServerPacketLengths {
         11, 8, 9, 24, 3, 12, -1, 8, -1, 8, -1, 7, -1, 12, -1, // A0
     ]
 
+    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
+
     public static func descriptor(for opcode: UInt8) -> Descriptor {
         guard Int(opcode) < sizes.count else { return .unsupported }
         let length = sizes[Int(opcode)]
@@ -32,11 +35,37 @@ public enum StockServerPacketLengths {
         return length == -1 ? .variable : .unsupported
     }
 
-    /// Does not consume a prefix or infer variable packet lengths from TCP reads.
+    /// Does not consume a prefix or infer packet lengths from TCP read boundaries.
     /// D2RL carriers are handled separately by GamePacketStream before this call.
     public static func resolve(_ prefix: Data) -> GamePacketLength {
         guard let opcode = prefix.first else { return .needMore }
         if case .fixed(let length) = descriptor(for: opcode) { return .length(length) }
-        return .unsupported
+        func byte(_ index: Int) -> Int { Int(prefix[prefix.startIndex + index]) }
+        func byteLength(_ offset: Int, minimum: Int, maximum: Int = 255) -> GamePacketLength {
+            guard prefix.count > offset else { return .needMore }
+            let length = byte(offset)
+            return (minimum...maximum).contains(length) ? .length(length) : .invalid
+        }
+        switch opcode {
+        case 0x5b:
+            guard prefix.count >= 3 else { return .needMore }
+            let length = byte(1) | (byte(2) << 8)
+            // Native reader reaches fixed byte94, then a terminated string at95.
+            return length >= 96 ? .length(length) : .invalid
+        case 0x67:
+            guard prefix.count >= 21 else { return .needMore }
+            return .length(22 + 4 * byte(20))
+        case 0x94:
+            guard prefix.count >= 2 else { return .needMore }
+            return .length(6 + 3 * byte(1))
+        case 0x9c: return byteLength(2, minimum: 8, maximum: 252)
+        case 0x9d: return byteLength(2, minimum: 13)
+        case 0xa8:
+            // D2R's native state-add layout differs from the legacy byte6 rule.
+            return byteLength(2, minimum: 9)
+        case 0xaa: return byteLength(6, minimum: 9)
+        case 0xac: return byteLength(12, minimum: 13)
+        default: return .unsupported
+        }
     }
 }

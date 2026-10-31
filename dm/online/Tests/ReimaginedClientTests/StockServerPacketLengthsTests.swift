@@ -35,7 +35,7 @@ final class StockServerPacketLengthsTests: XCTestCase {
     func testVariableInvalidAndSystemPacketsNeverResynchronizeIntoControl() throws {
         // Includes variable packets that old Diablo II references mark invalid,
         // plus the separate system greeting: neither may be guessed from a read.
-        for opcode: UInt8 in [0x12, 0x17, 0x2b, 0x2e, 0x9c, 0xae, 0xaf, 0xd1, 0xff] {
+        for opcode: UInt8 in [0x12, 0x17, 0x2b, 0x2e, 0xa6, 0xae, 0xaf, 0xd1, 0xff] {
             let stream = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
             let carrier = try ControlMessage(kind: 8, payload: Data()).gameCarrier()
             try stream.append(Data([opcode, 0, 0]) + carrier)

@@ -28,6 +28,24 @@ It does not encode D2EM, evaluate the full fingerprint contract or implement
 the required plugins. In particular, unmodeled `shared_patches` and listing
 fields are not silently turned into native capability claims.
 
+## Selected-room startup research
+
+The cached, signed revision-6 lobby bridge (SHA-256
+`237e2f16c045f87ffe8d01bdf05b19cf5cc7a8b6067357bcb33f70db11808920`)
+contains a relevant additional step: after matching the pending room's address
+and port to a Windows launch request, it writes that room's unsigned 16-bit
+`game_number` at Windows startup-input offset `0x41`. The write is in the
+inspected `0x38060` wrapper, at `0x385ed..0x38603`; its `0x3f680` helper copies
+exactly two bytes. This reference was checked against the signed manifest's
+file hash; no DLL was executed.
+
+This establishes a Windows launcher field, not the corresponding ARM64
+frontend field or a native room join. The existing prepared native startup
+still sets only address, mode and port. Do not infer that Windows `+0x41`
+maps directly to the packed Nintendo input, or write `main+0x21272b9` merely
+because the native join builder places its low 16 bits in the outgoing packet.
+The room-number transfer still needs an independent native mapping/test.
+
 ## Live verification
 
 On 31 October 2026 a signed native macOS probe, identifying its actual native

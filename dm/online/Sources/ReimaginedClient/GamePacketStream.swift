@@ -10,6 +10,7 @@ public enum GamePacketLength {
     case length(Int)
     case needMore
     case unsupported
+    case invalid
 }
 
 public enum DecodedGamePacket {
@@ -77,6 +78,7 @@ public final class GamePacketStream {
                     guard header.count < Self.maximumHeaderBytes else { throw GamePacketStreamError.invalidLength }
                     return try incomplete()
                 case .unsupported: throw GamePacketStreamError.unsupportedPacket(header[0])
+                case .invalid: throw GamePacketStreamError.invalidLength
                 }
                 guard (1...Self.maximumPacketBytes).contains(length) else { throw GamePacketStreamError.invalidLength }
             }

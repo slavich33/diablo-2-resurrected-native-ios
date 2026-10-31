@@ -22,12 +22,12 @@ void dm_online_tcp_release(void *handle);
 // Incremental game-packet layer AFTER transport framing/decompression.
 // These handles are caller-serialized, non-reentrant; keep callback/context
 // alive until release. The callback runs on the polling caller's thread.
-// Return packet length (1..65536), 0 = need more header, -1 = unsupported.
+// Return length (1..65536), 0 = need more header, -1 = unsupported, -2 = invalid.
 // Header prefix is bounded to 512 bytes. All ABI scalars are >= 32 bits.
 typedef int32_t (*dm_online_packet_length_fn)(void *context, const uint8_t *header, uint32_t available);
 void *dm_online_packets_open(dm_online_packet_length_fn resolver, void *context);
-// Exact-build fixed stock game packets, with no engine callback. Variable,
-// invalid and system-channel opcodes are terminal unsupported-packet errors.
+// Exact-build fixed and verified variable game packets, no engine callback.
+// Remaining variables/unknown/system opcodes are terminal unsupported errors.
 // D2RL remains separate. This is NOT a raw TCP decoder or gameplay admission.
 void *dm_online_packets_open_stock_94012(void);
 // Append: 0 accepted; -1 backpressure (retry same bytes after draining);

@@ -7,6 +7,7 @@
 static int32_t resolve(void *context, const uint8_t *header, uint32_t available) {
     assert(available > 0 && available <= 512);
     *(int *)context += 1;
+    if (header[0] == 0x11) return -2; // explicit invalid-length callback
     return header[0] == 0x10 ? 4 : -1;  // synthetic fixture, not a game table
 }
 
@@ -90,13 +91,30 @@ int main(void) {
     dm_online_packets_release(handle);
 
     // A real variable packet cannot be sized from its TCP chunk or skipped.
-    const uint8_t variable[] = {0x9c, 0, 3};
+    const uint8_t variable[] = {0x16, 0, 3};
     handle = dm_online_packets_open_stock_94012(); assert(handle);
     assert(dm_online_packets_append(handle, variable, sizeof(variable)) == 0);
     assert(dm_online_packets_append(handle, control, sizeof(control)) == 0);
     assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3 && kind == 0);
     assert(dm_online_packets_error(handle) == 1);
     assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3);
+    dm_online_packets_release(handle);
+
+    // Native A8 puts its total length at byte2, not the legacy byte6.
+    const uint8_t state_add[] = {0xa8,0,12,0,0,0,0,0,0,0,0,0};
+    handle = dm_online_packets_open_stock_94012(); assert(handle);
+    assert(dm_online_packets_append(handle, state_add, 2) == 0);
+    assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -1);
+    assert(dm_online_packets_append(handle, state_add + 2, sizeof(state_add) - 2) == 0);
+    assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == sizeof(state_add));
+    assert(kind == 1 && !memcmp(out, state_add, sizeof(state_add)));
+    dm_online_packets_release(handle);
+
+    const uint8_t invalid[] = {0x11};
+    handle = dm_online_packets_open(resolve, &calls); assert(handle);
+    assert(dm_online_packets_append(handle, invalid, sizeof(invalid)) == 0);
+    assert(dm_online_packets_read(handle, out, sizeof(out), &kind) == -3 && kind == 0);
+    assert(dm_online_packets_error(handle) == 2);
     dm_online_packets_release(handle);
     puts("C packet ABI: callbacks, verified fixed stock lengths, split input, retained retry, opaque loader routing, ordered drain and truncated EOF passed.");
     return 0;
