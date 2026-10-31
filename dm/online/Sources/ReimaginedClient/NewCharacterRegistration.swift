@@ -32,7 +32,8 @@ public final class NewCharacterJournal {
     public enum State: String, Codable { case prepared, attempted, confirmed }
     private struct Record: Codable {
         var format: Int
-        var operationID: UUID
+        var operationID: String
+        var legacyUnsentOperationID: String?
         var accountDigest: String
         var ladderID: UUID
         var bundleID: UUID
@@ -50,7 +51,7 @@ public final class NewCharacterJournal {
     }
     private var record: Record
     public let url: URL
-    public var operationID: UUID { record.operationID }
+    public var operationID: String { record.operationID }
     public var ladderID: UUID { record.ladderID }
     public var state: State { record.state }
     public var fileName: String { record.name + ".d2s" }
@@ -76,7 +77,7 @@ public final class NewCharacterJournal {
             guard attributes[.type] as? FileAttributeType == .typeRegular,
                   ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 65_536 else { throw RegistrationError.invalidJournal }
             record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: destination))
-            guard record.format == 1, record.accountDigest == scope.accountDigest, record.ladderID == scope.ladderID,
+            guard [1, 2].contains(record.format), record.accountDigest == scope.accountDigest, record.ladderID == scope.ladderID,
                   record.name == header.characterName, record.header == header.bytes,
                   record.bundleRevision > 0, record.artifactSHA256.utf8.count == 64, record.manifestSHA256.utf8.count == 64,
                   record.bodySHA256 == Self.digest(record.body),
@@ -84,11 +85,26 @@ public final class NewCharacterJournal {
                       revision: record.bundleRevision, artifactSHA256: record.artifactSHA256, header: header) else {
                 throw RegistrationError.invalidJournal
             }
+            if record.format == 1 {
+                // The legacy GUID route was rejected before POST. Only a
+                // durably unattempted request may receive the correct wire ID;
+                // uncertain/attempted operations are never replaced.
+                guard record.state == .prepared, UUID(uuidString: record.operationID) != nil else {
+                    throw RegistrationError.receiptPending
+                }
+                record.legacyUnsentOperationID = record.operationID
+                record.operationID = Self.newOperationID()
+                record.body = Self.body(operationID: record.operationID, bundleID: record.bundleID,
+                    revision: record.bundleRevision, artifactSHA256: record.artifactSHA256, header: header)
+                record.bodySHA256 = Self.digest(record.body); record.format = 2
+                try persist()
+            }
+            guard Self.validOperationID(record.operationID) else { throw RegistrationError.invalidJournal }
         } else {
-            let operation = UUID()
+            let operation = Self.newOperationID()
             let body = Self.body(operationID: operation, bundleID: package.bundleID, revision: package.revision,
                                  artifactSHA256: package.artifactSHA256, header: header)
-            record = Record(format: 1, operationID: operation, accountDigest: scope.accountDigest, ladderID: package.ladderID,
+            record = Record(format: 2, operationID: operation, accountDigest: scope.accountDigest, ladderID: package.ladderID,
                 bundleID: package.bundleID, bundleRevision: package.revision, artifactSHA256: package.artifactSHA256,
                 manifestSHA256: package.manifestSHA256, name: header.characterName, header: header.bytes,
                 body: body, bodySHA256: Self.digest(body), state: .prepared)
@@ -107,7 +123,8 @@ public final class NewCharacterJournal {
         let fd = try Self.acquireLock(url)
         defer { flock(fd, LOCK_UN); Darwin.close(fd) }
         let disk = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
-        guard disk.format == 1, disk.operationID == record.operationID, disk.body == record.body, disk.header == record.header,
+        guard disk.format == 2, Self.validOperationID(disk.operationID), disk.operationID == record.operationID,
+              disk.body == record.body, disk.header == record.header,
               disk.bodySHA256 == record.bodySHA256, disk.bodySHA256 == Self.digest(disk.body),
               disk.name == record.name, disk.accountDigest == record.accountDigest else { throw RegistrationError.invalidJournal }
         guard disk.state == .prepared else { throw RegistrationError.alreadyAttempted }
@@ -163,21 +180,29 @@ public final class NewCharacterJournal {
         return fd
     }
 
-    private static func body(operationID: UUID, bundleID: UUID, revision: Int,
+    private static func body(operationID: String, bundleID: UUID, revision: Int,
                              artifactSHA256: String, header: NewCharacterHeader) -> Data {
         // Fresh registration intentionally omits expectedVersion. It never
         // sends journal/progress/deletion fields or an existing offline save.
         try! JSONSerialization.data(withJSONObject: [
             "bundleIdentity": "\(bundleID.uuidString.lowercased()):\(revision):\(artifactSHA256.lowercased())",
-            "operationId": operationID.uuidString.lowercased(),
+            "operationId": operationID.lowercased(),
             "files": [["fileName": header.fileName, "contentBase64": header.bytes.base64EncodedString()]]
         ], options: [.sortedKeys, .withoutEscapingSlashes])
+    }
+    private static func newOperationID() -> String {
+        // Matches the plugin's SHA-256 of 32 securely random bytes: 64 lower
+        // hexadecimal characters, not a GUID or Windows-specific identity.
+        SymmetricKey(size: .bits256).withUnsafeBytes { Self.digest(Data($0)) }
+    }
+    private static func validOperationID(_ value: String) -> Bool {
+        value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
     private static func digest(_ bytes: Data) -> String { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
 }
 
 public struct NewCharacterRegistrationResult {
-    public let operationID: UUID
+    public let operationID: String
     public let initialCharacter: VerifiedServerSave
     public let isolatedSnapshot: URL
     public let snapshotFileCount: Int
@@ -244,14 +269,14 @@ public struct ServerSaveWriteReceipt: Decodable {
         public let sha256: String
         public let version: Int64?
     }
-    public let operationId: UUID?
+    public let operationId: String?
     public let written: [Written]
     public let deleted: [String]?
 
     @discardableResult
     public static func decodeAndValidate(_ data: Data, journal: NewCharacterJournal) throws -> ServerSaveWriteReceipt {
         let result = try ReimaginedJSON.decoder().decode(Self.self, from: data)
-        guard result.operationId == nil || result.operationId == journal.operationID,
+        guard result.operationId == nil || result.operationId?.lowercased() == journal.operationID,
               result.deleted?.isEmpty != false, result.written.count == 1,
               let file = result.written.first, file.fileName.caseInsensitiveCompare(journal.fileName) == .orderedSame,
               file.sha256.lowercased() == journal.fileSHA256, file.version == nil || file.version! > 0 else {

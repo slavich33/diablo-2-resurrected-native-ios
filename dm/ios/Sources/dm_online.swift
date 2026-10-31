@@ -60,6 +60,15 @@ private final class OnlineDiagnosticTransport: HTTPTransport {
            code.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }) {
             observation["code"] = code
         }
+        if status == 400, let root = object as? [String: Any], let detail = root["detail"] as? String {
+            // Keep only protocol-validation vocabulary, never arbitrary reply
+            // text, request values, account identifiers or credential strings.
+            let allowed: Set<String> = ["operation", "id", "must", "be", "hexadecimal", "hex", "characters", "character",
+                "length", "lowercase", "uppercase", "invalid", "required", "guid", "uuid", "bundle", "identity",
+                "query", "parameter", "missing", "sha256", "between", "exactly", "contain", "only"]
+            observation["validationWords"] = Array(detail.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map(String.init).filter { allowed.contains($0) || Int($0).map { (0...4096).contains($0) } == true }.prefix(32))
+        }
         lock.lock(); registrationReplies.append(observation); registrationReplies = Array(registrationReplies.suffix(16))
         let snapshot = registrationReplies; lock.unlock()
         guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
@@ -312,6 +321,10 @@ private final class OnlineController: UIViewController, UITableViewDataSource, U
             // A narrow-token/ticket refusal must not remove the launcher's
             // separate Keychain session or expose raw server responses.
             report["failed"] = true
+            if stage == "new-character-registration" {
+                report.removeValue(forKey: "characterWritten")
+                report["registrationOutcomeUnconfirmed"] = true
+            }
             if case ClientError.http(let code) = error { report["httpStatus"] = code }
             else { report["errorType"] = String(reflecting: type(of: error)) }
             if let failure = error as? RegistrationError { report["registrationError"] = String(describing: failure) }

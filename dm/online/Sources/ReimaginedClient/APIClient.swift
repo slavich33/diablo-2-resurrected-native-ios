@@ -182,7 +182,7 @@ public final class ReimaginedAPIClient {
                                     ticket: LadderLaunchTicket, now: Date = Date()) async throws -> Data? {
         try validateSaveSession(ladderID: journal.ladderID, gameToken: gameToken, ticket: ticket, now: now)
         do {
-            let (bytes, _) = try await json(path: "characters/saves/snapshot/receipts/" + journal.operationID.uuidString.lowercased(),
+            let (bytes, _) = try await json(path: "characters/saves/snapshot/receipts/" + journal.operationID,
                 token: gameToken.accessToken, query: [URLQueryItem(name: "ladderId", value: journal.ladderID.uuidString.lowercased())],
                 launchTicket: ticket.launchTicket)
             return bytes

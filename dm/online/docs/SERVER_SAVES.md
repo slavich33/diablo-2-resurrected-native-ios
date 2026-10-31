@@ -85,7 +85,8 @@ here. The existing offline save path remains separate.
 ## Fresh-character registration
 
 `NewCharacterJournal` records one fresh engine-created header, exact request
-bytes and a UUID operation in an account/ladder namespace. The local account
+bytes and a 64-character lowercase hexadecimal operation ID in an account/ladder
+namespace (SHA-256 of 32 securely random bytes, matching the plugin). The local account
 namespace uses the JWT subject only as a path hint, not as authentication; the
 actual bearer is authorized by the server before the journal is prepared.
 Token rotation does not change the namespace and tokens are never written to
@@ -106,6 +107,12 @@ header readback confirm the journal. Downloaded files are staged as a new
 isolated Switch-layout generation, without activating `DM_SAVE`. The narrow
 token is revoked on success and failure. Actual live registration remains
 unverified until a device-side POST/receipt/download round trip is observed.
+
+The first physical-device attempt stopped at receipt lookup with HTTP 400
+before any POST. The initial implementation used a GUID; the inspected plugin
+instead generates a 64-character digest. The journal migrates a legacy GUID
+only while it is durably `prepared`, retaining the old unsent identifier for
+audit. An attempted/unknown operation is never replaced by this migration.
 
 An explicit device-test switch `DM_ONLINE_REGISTER_DIAGNOSTICS=1`, alongside
 the package inspection switches, uses only the dedicated original-engine

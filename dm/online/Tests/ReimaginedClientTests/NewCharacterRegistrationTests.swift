@@ -102,6 +102,8 @@ final class NewCharacterRegistrationTests: XCTestCase {
         let first = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
         let other = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
         XCTAssertEqual(first.operationID, other.operationID); XCTAssertEqual(first.requestBody, other.requestBody)
+        XCTAssertEqual(first.operationID.utf8.count, 64)
+        XCTAssertTrue(first.operationID.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) })
         try first.beginAttempt(package: proof)
         XCTAssertThrowsError(try other.beginAttempt(package: proof)) { XCTAssertEqual($0 as? RegistrationError, .alreadyAttempted) }
         let resumed = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
@@ -171,5 +173,36 @@ final class NewCharacterRegistrationTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: data).write(to: journal.url)
         XCTAssertThrowsError(try journal.beginAttempt(package: proof)) { XCTAssertEqual($0 as? RegistrationError, .invalidJournal) }
         XCTAssertThrowsError(try NewCharacterJournal(header: header, scope: scope, package: proof, root: root))
+    }
+
+    func testLegacyGUIDMigrationIsLimitedToUnattemptedRequests() throws {
+        for attempted in [false, true] {
+            let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+            let header = try header(), bundle = bundle(), proof = VerifiedLadderPackage(descriptor: bundle, fileCount: 1)
+            let scope = try session().localSaveScope(origin: ReimaginedAPIClient.production, ladderID: bundle.ladderId)
+            let first = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
+            var record = try JSONSerialization.jsonObject(with: Data(contentsOf: first.url)) as! [String: Any]
+            let legacy = UUID().uuidString
+            var body = try JSONSerialization.jsonObject(with: first.requestBody) as! [String: Any]
+            body["operationId"] = legacy.lowercased()
+            let bytes = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .withoutEscapingSlashes])
+            record["format"] = 1; record["operationID"] = legacy; record["body"] = bytes.base64EncodedString()
+            record["bodySHA256"] = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            record["state"] = attempted ? "attempted" : "prepared"
+            try JSONSerialization.data(withJSONObject: record).write(to: first.url)
+            if attempted {
+                XCTAssertThrowsError(try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)) {
+                    XCTAssertEqual($0 as? RegistrationError, .receiptPending)
+                }
+                let unchanged = try JSONSerialization.jsonObject(with: Data(contentsOf: first.url)) as! [String: Any]
+                XCTAssertEqual(unchanged["operationID"] as? String, legacy)
+            } else {
+                let migrated = try NewCharacterJournal(header: header, scope: scope, package: proof, root: root)
+                XCTAssertEqual(migrated.state, .prepared); XCTAssertEqual(migrated.operationID.count, 64)
+                let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: first.url)) as! [String: Any]
+                XCTAssertEqual(saved["legacyUnsentOperationID"] as? String, legacy)
+                XCTAssertEqual(saved["format"] as? Int, 2)
+            }
+        }
     }
 }
