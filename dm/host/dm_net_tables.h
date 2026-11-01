@@ -20,8 +20,10 @@ void dm_net_tables_install(void);
 // Query with rows=NULL/capacity=0/generation=0, then copy with that generation.
 // A reload between query and copy returns STALE without writing any row bytes.
 // Each successful copy is owned by the caller and remains valid after reload.
-// Names are copied from the loaded edition's linker, never a bundled base-game
-// name list. resolved_names=0 means linker capture failed; rows can still be read.
+// Names come from the loaded edition's linker. With the matching source gates,
+// original text spelling is retained only after complete ID/name agreement in
+// the same loader invocation. No bundled name list or host hash is substituted.
+// resolved_names=0 means name capture/binding failed; rows can still be read.
 // Mod identity, active-environment verification and save admission are separate.
 int dm_net_itemstatcost_copy(unsigned edition, uint64_t generation,
                             void *rows, size_t capacity,

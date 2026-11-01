@@ -801,6 +801,11 @@ NET_TABLE_CAPTURE = os.environ.get('DM_NET_TABLE_CAPTURE') == '1' and NAME == 'm
 if NET_TABLE_CAPTURE:
     assert BUILD_ID == RULE_BUILD, 'Unsupported native table-capture module'
     assert bytes(IMG[0x4f9600:0x4f9620]).hex() == 'ff833a91fd7b45a9f44f44a9f65743a9f85f42a9fa6741a9fc6fc6a8c0035fd6', 'Unexpected ItemStatCost epilogue'
+    assert bytes(IMG[0x4f8200:0x4f8220]).hex() == 'fc6fbaa9fa6701a9f85f02a9f65703a9f44f04a9fd7b05a9fd430191ff833ad1', 'Unexpected ItemStatCost entry'
+    assert bytes(IMG[0x4d9210:0x4d9230]).hex() == 'e003142aff9311f91afcff97e00b409100800c9117272494602d00b4172040b9', 'Unexpected raw text parse window'
+    assert bytes(IMG[0x4f8894:0x4f8898]).hex() == 'eb81ff97', 'Unexpected ItemStatCost generic-loader caller'
+    obs.append((0x4f8200, 25, 'a9ba6ffc', 'net-tables-v2: begin ItemStatCost load; clear prior thread-local source spelling before binary/text paths diverge'))
+    obs.append((0x4d9220, 24, '910c8000', 'net-tables-v2: raw text before parser; only checked ItemStatCost caller/manager may supply source spelling'))
     obs.append((0x4f9600, 23, '913a83ff', 'net-tables-v1: completed ItemStatCost loader, x23 selected manager; read-only copied rows before normal return'))
 
 if RULE_RUN and PRIVATE_GATES:
@@ -827,7 +832,7 @@ for off, oid, ow, why in obs:
     assert f'{w:08x}' == ow, f'观测门原指令不符 {off:#x}：{w:08x}'
     # Keep an explicit site allowlist. entry.S restores all general/vector registers
     # and NZCV/FPSR/FPCR; structck/gatefn independently check the gate ABI.
-    assert off in set(starts) or (oid == 6 and off == 0x43ecc8) or (NET_TABLE_CAPTURE and oid == 23 and off == 0x4f9600), f'private obs point not approved {off:#x}'
+    assert off in set(starts) or (oid == 6 and off == 0x43ecc8) or (NET_TABLE_CAPTURE and (off, oid) in {(0x4f9600, 23), (0x4d9220, 24)}), f'private obs point not approved {off:#x}'
     assert off < TEXT_END and off not in kinds and not any(lo <= off < hi for wseg in windows for lo, hi in [(wseg[0].address, wseg[-1].address + 4)]), f'观测门与改写点冲突 {off:#x}'
     put_branch(off, site_obs(off, oid, w)); stat('obs')
 

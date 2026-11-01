@@ -7,10 +7,34 @@
 
 module_t g_mod[MAX_MOD];
 int g_nmod = 1;
-static int gate_present;
-static void (*observer)(const uint64_t *);
-int gate_obs_present(int id) { assert(id == OBS_NET_ITEMSTATCOST); return gate_present; }
-void gate_obs_set(int id, void (*fn)(const uint64_t *)) { assert(id == OBS_NET_ITEMSTATCOST); observer = fn; }
+static int gate_present, source_gates;
+static void (*observer)(const uint64_t *), (*begin_observer)(const uint64_t *), (*source_observer)(const uint64_t *);
+int gate_obs_present(int id) {
+    assert(id == OBS_NET_ITEMSTATCOST || id == OBS_NET_ITEMSTATCOST_BEGIN || id == OBS_NET_ITEMSTATCOST_SOURCE);
+    return gate_present && (id == OBS_NET_ITEMSTATCOST || source_gates);
+}
+void gate_obs_set(int id, void (*fn)(const uint64_t *)) {
+    if (id == OBS_NET_ITEMSTATCOST) observer = fn;
+    else if (id == OBS_NET_ITEMSTATCOST_BEGIN) begin_observer = fn;
+    else { assert(id == OBS_NET_ITEMSTATCOST_SOURCE); source_observer = fn; }
+}
+
+static void observe_begin(unsigned edition) {
+    uint64_t regs[100] = {0}, before[100]; regs[0] = edition; memcpy(before, regs, sizeof regs);
+    begin_observer(regs); assert(!memcmp(regs, before, sizeof regs));
+}
+static void observe_source(uint64_t manager, const char *text, size_t size, size_t capacity, int wrong_caller) {
+    uint64_t frame[8] = {manager}, vector[3] = {(uintptr_t)text, size, capacity}, regs[100] = {0}, before[100];
+    regs[0] = (uintptr_t)vector - 0x320; regs[23] = (uintptr_t)g_mod[0].base + 0x4f8898 + wrong_caller;
+    regs[29] = (uintptr_t)frame + 0x28; memcpy(before, regs, sizeof regs);
+    source_observer(regs); assert(!memcmp(regs, before, sizeof regs));
+}
+static const char mixed_source[] = "Stat\t*ID\tIgnored\r\nStrength\t0\tx\r\nSynthetic-Long-Stat-Name\t1\ty\r\n";
+static void *source_worker(void *context) {
+    observe_source((uintptr_t)context, mixed_source, sizeof mixed_source - 1, sizeof mixed_source, 0);
+    return NULL;
+}
+static void *begin_worker(void *context) { (void)context; observe_begin(3); return NULL; }
 typedef struct { pthread_mutex_t lock; pthread_cond_t condition; int started, done; const uint64_t *regs; } reload_job;
 static void *reload_worker(void *context) {
     reload_job *job = context;
@@ -129,6 +153,61 @@ int main(void) {
         memset(source, 0xa3, sizeof source); memset(out, 0x7b, sizeof out);
         memset(g_mod[0].base + 0x2d64a18 + 16 * e, 0, 8);
     }
+    // Source spelling belongs to this loader invocation, manager and thread.
+    memcpy(g_mod[0].base + 0x2d64a18 + 16 * 3, &(uint64_t){(uintptr_t)manager}, 8);
+    source_gates = 1; dm_net_tables_install(); assert(begin_observer && source_observer);
+    manager[0x1290 / 8] = (uintptr_t)source; manager[0x1298 / 8] = manager[0x12a0 / 8] = 2;
+    regs[23] = (uintptr_t)manager;
+    char name[64]; size_t required;
+    observe_begin(3);
+    observe_source((uintptr_t)manager, mixed_source, sizeof mixed_source - 1, sizeof mixed_source, 0);
+    observer(regs);
+    assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY && info.resolved_names == 2);
+    uint64_t canonical_generation = info.generation;
+    assert(dm_net_itemstatcost_name(3, info.generation, 0, name, sizeof name, &required) == DM_NET_TABLE_READY && !strcmp(name, "Strength"));
+    assert(dm_net_itemstatcost_name(3, info.generation, 1, name, sizeof name, &required) == DM_NET_TABLE_READY && !strcmp(name, "Synthetic-Long-Stat-Name"));
+    assert(dm_net_itemstatcost_copy(3, info.generation, out, sizeof out, &info) == DM_NET_TABLE_READY && !memcmp(out, source, sizeof out));
+    const char lf_source[] = "Stat\tIgnored\tID\nStrength\tx\t0\nSynthetic-Long-Stat-Name\ty\t1";
+    observe_begin(3); observe_source((uintptr_t)manager, lf_source, sizeof lf_source - 1, sizeof lf_source, 0); observer(regs);
+    assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY && info.resolved_names == 2);
+    assert(dm_net_itemstatcost_name(3, info.generation, 1, name, sizeof name, &required) == DM_NET_TABLE_READY && !strcmp(name, "Synthetic-Long-Stat-Name"));
+    observer(regs); // Completion cannot reuse an earlier invocation's source.
+    assert(dm_net_itemstatcost_name(3, canonical_generation, 0, name, sizeof name, &required) == DM_NET_TABLE_STALE);
+    assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY);
+    assert(dm_net_itemstatcost_name(3, info.generation, 0, name, sizeof name, &required) == DM_NET_TABLE_READY && !strcmp(name, "strength"));
+    const char *invalid_sources[] = {
+        "Stat\t*ID\nStrength\t0\nSynthetic-Long-Stat-Name\t0\n", // Duplicate ID.
+        "Stat\t*ID\nStrength\t0\nSynthetic-Long-Stat-Name\t2\n", // Hole.
+        "Stat\t*ID\nDifferent\t0\nSynthetic-Long-Stat-Name\t1\n", // Linker mismatch.
+        "Stat\t*ID\nStrength\t0\n", // Missing row.
+        "Stat\tWrong\nStrength\t0\nSynthetic-Long-Stat-Name\t1\n",
+        "Stat\t*ID\nStrength\t0\n\nSynthetic-Long-Stat-Name\t1\n",
+    };
+    for (size_t i = 0; i < sizeof invalid_sources / sizeof *invalid_sources; ++i) {
+        observe_begin(3); observe_source((uintptr_t)manager, invalid_sources[i], strlen(invalid_sources[i]), strlen(invalid_sources[i]), 0);
+        observer(regs);
+        assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY && !info.resolved_names);
+    }
+    for (unsigned bad = 0; bad < 6; ++bad) {
+        observe_begin(3);
+        observe_source((uintptr_t)manager + (bad == 0 ? 8 : 0), bad == 1 ? (void *)4096 : mixed_source,
+                       bad == 2 ? 8 * 1024 * 1024 + 1 : sizeof mixed_source - 1,
+                       bad == 3 ? 1 : 8 * 1024 * 1024 + 1, 0);
+        if (bad == 4) observe_source((uintptr_t)manager, mixed_source, sizeof mixed_source - 1, sizeof mixed_source, 0);
+        if (bad == 5) { pthread_t t; assert(!pthread_create(&t, NULL, begin_worker, NULL)); assert(!pthread_join(t, NULL)); }
+        observer(regs);
+        assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY && !info.resolved_names);
+    }
+    // Wrong caller, another thread, or a new binary load cannot borrow source spellings.
+    for (unsigned no_source = 0; no_source < 3; ++no_source) {
+        observe_begin(3);
+        if (no_source == 0) observe_source((uintptr_t)manager, mixed_source, sizeof mixed_source - 1, sizeof mixed_source, 4);
+        if (no_source == 1) { pthread_t t; assert(!pthread_create(&t, NULL, source_worker, manager)); assert(!pthread_join(t, NULL)); }
+        if (no_source == 2) { observe_source((uintptr_t)manager, mixed_source, sizeof mixed_source - 1, sizeof mixed_source, 0); observe_begin(3); }
+        observer(regs);
+        assert(dm_net_itemstatcost_copy(3, 0, NULL, 0, &info) == DM_NET_TABLE_READY && info.resolved_names == 2);
+        assert(dm_net_itemstatcost_name(3, info.generation, 0, name, sizeof name, &required) == DM_NET_TABLE_READY && !strcmp(name, "strength"));
+    }
     free(manager); free(g_mod[0].base);
-    puts("native table capture: edition isolation, immutable copy, pinned publication across reload, same-thread release and failed-read invalidation passed");
+    puts("native table capture: immutable generations, pinned publication, source spelling, strict IDs, manager/thread/load isolation and failed-read invalidation passed");
 }
