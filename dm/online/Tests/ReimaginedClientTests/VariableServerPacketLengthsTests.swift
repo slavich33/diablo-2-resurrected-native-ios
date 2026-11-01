@@ -6,6 +6,7 @@ final class VariableServerPacketLengthsTests: XCTestCase {
         let definitions: [(UInt8, Int, [Int: UInt8])] = [
             (0x5b, 97, [1: 97, 2: 0]), (0x5b, 300, [1: 44, 2: 1]),
             (0x67, 22, [20: 0]), (0x67, 26, [20: 1]), (0x67, 1042, [20: 255]),
+            (0x73, 21, [20: 0]), (0x73, 88, [20: 1]),
             (0x94, 6, [1: 0]), (0x94, 30, [1: 8]), (0x94, 771, [1: 255]),
             (0x9c, 20, [2: 20]), (0x9c, 252, [2: 252]),
             (0x9d, 33, [2: 33]), (0xa8, 12, [2: 12]),
@@ -75,6 +76,34 @@ final class VariableServerPacketLengthsTests: XCTestCase {
         try stream.append(slice.prefix(3))
         stream.endOfInput()
         XCTAssertThrowsError(try stream.nextPacket()) {
+            XCTAssertEqual($0 as? GamePacketStreamError, .truncatedPacket)
+        }
+    }
+
+    func testRecordBatchWaitsForCountAndCompleteBodyWithoutScanningPayload() throws {
+        var bytes = Data(repeating: 0xd0, count: 21 + 67 * 255)
+        bytes[0] = 0x73; bytes[20] = 255
+        for count in 0..<21 {
+            guard case .needMore = StockServerPacketLengths.resolve(bytes.prefix(count)) else {
+                return XCTFail("Read count before its header byte arrived")
+            }
+        }
+        guard case .length(17_106) = StockServerPacketLengths.resolve((Data([99]) + bytes).dropFirst()) else {
+            return XCTFail("Incorrect maximum batch length")
+        }
+        let control = try ControlMessage(kind: 8, payload: Data()).gameCarrier()
+        let stream = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+        try stream.append(bytes.dropLast())
+        XCTAssertNil(try stream.nextPacket())
+        try stream.append(bytes.suffix(1) + control)
+        guard case .gameplay(let actual) = try stream.nextPacket(),
+              case .control(let following) = try stream.nextPacket() else { return XCTFail("Lost batch boundary") }
+        XCTAssertEqual(actual, bytes)
+        XCTAssertEqual(following.kind, 8)
+        XCTAssertNil(try stream.nextPacket())
+        let truncated = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+        try truncated.append(bytes.dropLast()); truncated.endOfInput()
+        XCTAssertThrowsError(try truncated.nextPacket()) {
             XCTAssertEqual($0 as? GamePacketStreamError, .truncatedPacket)
         }
     }

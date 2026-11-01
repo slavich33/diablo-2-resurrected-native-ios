@@ -2,7 +2,7 @@ import Foundation
 
 /// Server-to-client game-packet metadata for the supported 3.3.94012 engine.
 /// These are packet lengths after transport decoding, not TCP record lengths.
-/// Eight variable formats are checked against native header readers and bounded
+/// Nine variable formats are checked against native readers and bounded
 /// original-engine captures. Other variables and the system channel are separate.
 public enum StockServerPacketLengths {
     public enum Descriptor: Equatable {
@@ -26,7 +26,7 @@ public enum StockServerPacketLengths {
         11, 8, 9, 24, 3, 12, -1, 8, -1, 8, -1, 7, -1, 12, -1, // A0
     ]
 
-    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
+    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x73, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
 
     public static func descriptor(for opcode: UInt8) -> Descriptor {
         guard Int(opcode) < sizes.count else { return .unsupported }
@@ -55,6 +55,10 @@ public enum StockServerPacketLengths {
         case 0x67:
             guard prefix.count >= 21 else { return .needMore }
             return .length(22 + 4 * byte(20))
+        case 0x73:
+            // Native reader: 21-byte header, count at20, 67-byte records.
+            guard prefix.count >= 21 else { return .needMore }
+            return .length(21 + 67 * byte(20))
         case 0x94:
             guard prefix.count >= 2 else { return .needMore }
             return .length(6 + 3 * byte(1))

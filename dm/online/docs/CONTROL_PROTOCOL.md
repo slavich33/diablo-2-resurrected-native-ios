@@ -60,7 +60,7 @@ This does not specify transport-level framing/compression, ordinary gameplay pac
 
 ## Incremental decoding and the native polling boundary
 
-`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. Its packet-length resolver must be independently verified. The original callback tests use synthetic stock packets; `StockServerPacketLengths` additionally supplies the 126 fixed packet lengths from the supported ARM64 engine. All 175 descriptors (including 23 variable and 26 invalid entries) independently match the pinned Windows reference. Eight variable formats now have separate native-reader and original-engine capture evidence below; 15 remain unsupported. No packet is sized from a TCP read or copied from a legacy game's table. System-channel opcodes beginning at `0xaf` are outside this table. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
+`GamePacketStream` assembles this carrier across partial reads and can interleave it with ordinary game packets **after transport processing**. Its packet-length resolver must be independently verified. The original callback tests use synthetic stock packets; `StockServerPacketLengths` additionally supplies the 126 fixed packet lengths from the supported ARM64 engine. All 175 descriptors (including 23 variable and 26 invalid entries) independently match the pinned Windows reference. Nine variable formats now have native-reader evidence: eight have separate offline engine captures and `0x73` has a real peer observation below; 14 remain unsupported. No packet is sized from a TCP read or copied from a legacy game's table. System-channel opcodes beginning at `0xaf` are outside this table. This decoder is not yet attached to the game's packet pump or directly to raw production TCP.
 
 `dm_online_packets_open_stock_94012()` exposes the supported fixed and variable sizes without calling guest code. It preserves D2RL routing, bounded buffering, short-output retry and terminal errors. It refuses an unimplemented variable/invalid/system opcode before any later carrier can be interpreted. Malformed declared lengths are terminal `invalidLength`, separately from an unsupported opcode. Generic C callbacks return -2 for an invalid length, -1 for unsupported, 0 for more header and positive lengths for complete sizing. To recheck the protocol metadata against owned inputs without executing any game function:
 
@@ -79,6 +79,7 @@ These rules refer to complete logical game packets, not socket records. Offsets 
 | --- | --- | --- |
 | `0x5b` | `u16-le(1)` | total >= 96; fixed reader reaches byte 94, terminated tail starts at 95 |
 | `0x67` | `22 + 4 * byte(20)` | need 21 bytes to determine size |
+| `0x73` | `21 + 67 * byte(20)` | need 21 bytes; count 0..255, total 21..17106 |
 | `0x94` | `6 + 3 * byte(1)` | need 2 bytes to determine size |
 | `0x9c` | `byte(2)` | 8..252, matching the native copy guard |
 | `0x9d` | `byte(2)` | 13..255 |
@@ -160,3 +161,14 @@ python tools/verify_loader_frames.py --dll /path/to/your/D2RCore.dll
 ```
 
 The matching result proves these codecs against the pinned reference components. It does not prove original packet-size callbacks, TCP framing/compression, complete D2RL admission, required native plugin behavior, remote role bootstrap, accepted ladder join or server-save persistence.
+
+### Additional live record-batch observation
+
+On 1 November 2026 a private bounded native macOS integration, using actual
+native identity and verified revision8 resources, received an 88-byte `0x73`
+packet with count1 after the initial loading messages. The supported engine's
+reader consumes its count at20 and 67-byte records beginning at21. The new
+resolver follows that structure; it never scans payload bytes for later magic
+or uses socket-read length. Tests cover fragmented headers, every split of the
+zero/one-record cases, maximum count, following control packets and truncated
+EOF. This observation does not prove every peer body variant or world gameplay.

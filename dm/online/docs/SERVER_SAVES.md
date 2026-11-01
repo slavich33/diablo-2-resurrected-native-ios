@@ -168,3 +168,23 @@ dotnet run --project dm/online/tools/SaveReference -- /path/to/own/save-samples 
 
 Repeat for each applicable primary/base dataset. The tool does not validate
 bundle signatures or establish live game/server compatibility.
+
+## Progress-header preflight and first updated server snapshot
+
+`Version105CharacterHeader` checks name, format, declared size, class/edition,
+level and whole-file rolling checksum, and computes SHA256 without changing the
+input. It accepts complete saves after creation; it does not require the
+403-byte initial size or the new-character flag. `NewCharacterHeader` retains
+those stricter requirements for the separate registration operation. Neither
+reader migrates or validates item/quest serialization or proves server ownership.
+
+After the private native Mac loading exchange on 1 November 2026, a separate
+authenticated API read returned server-authoritative version2 entries: a
+1237-byte character and an 828-byte shared stash. Fresh downloads matched the
+manifest byte counts and hashes. The character's version105 header, selected
+identity and rolling checksum independently matched; its bytes differed from
+the registered initial header. Reconnection downloaded that current snapshot
+rather than re-registering or restoring the initial character. It reached an
+item-reader assertion. This proves a first updated server snapshot/readback,
+not playable iPhone ladder, item compatibility or saved user gameplay progress.
+No names, account identifiers, captures or character files are published.

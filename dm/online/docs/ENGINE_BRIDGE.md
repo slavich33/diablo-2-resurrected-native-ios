@@ -41,7 +41,7 @@ Build the SDK and required modules with matching source/tool versions. An iPhone
 
 The network side drains outgoing **complete game packets** with `dm_net_remote_read`, and feeds incoming complete packets into system or gameplay channels with `dm_net_remote_feed`. A verified transport codec must perform framing/decompression and channel classification first. Raw TCP reads must not be fed directly. D2RL admission/control handling remains above these queues; feeding a packet does not mark a player admitted.
 
-The Swift packet layer includes 126 fixed server-game packet lengths and eight native variable formats, exposed through C without invoking guest handlers. All 175 descriptors match both exact ARM64 input and an independently pinned Windows reference; the variable rules have separate native-reader/capture evidence. The opt-in `dm_online_packets_open_native_94012` additionally returns native logical AF/B0/B3/B4 through kind4, intended for `DM_NET_SYSTEM` after independent transport/peer-format verification. The original stock entry point remains strict and does not accept system packets. Fifteen variable formats, B1/B2, peer-system-format translation and transport processing remain open; this partial resolver must not activate a production game pump. See `CONTROL_PROTOCOL.md`, `tools/verify_stock_lengths.py` and `tools/verify_game_packet_capture.swift` for reproduction and limits.
+The Swift packet layer includes 126 fixed server-game packet lengths and nine native variable formats, exposed through C without invoking guest handlers. All 175 descriptors match both exact ARM64 input and an independently pinned Windows reference; the variable rules have separate native-reader/capture evidence. The opt-in `dm_online_packets_open_native_94012` additionally returns native logical AF/B0/B3/B4 through kind4, intended for `DM_NET_SYSTEM` after independent transport/peer-format verification. The original stock entry point remains strict and does not accept system packets. Fourteen variable formats, B1/B2, peer-system-format translation and transport processing remain open; this partial resolver must not activate a production game pump. See `CONTROL_PROTOCOL.md`, `tools/verify_stock_lengths.py` and `tools/verify_game_packet_capture.swift` for reproduction and limits.
 
 Each queue is capped at 256 KiB/1024 packets, with 64 KiB per packet. A short outgoing buffer retains the packet for retry. Overflow is terminal and observable through `dm_net_remote_error`; it does not silently drop commands and continue. Closed bindings remain attached until explicit detach, so an interrupted remote game cannot fall back to local queues. Generation IDs reject late network callbacks from a previous connection.
 
@@ -80,3 +80,21 @@ Independent LLVM structure verification passes for the final rewritten main, inc
 `tools/verify_engine_start.py /path/to/ExeFS/main` independently checks the original ARM64 start/status ordering with bounded, development-only Unicorn execution. It verifies the entire original NSO first, replaces only resolver/clock/generic-storage calls with isolated stand-ins, and never invokes an OS, network or game entry point. Original start selects state 2; status is false while that backend is pending, true after its modeled completion without calling connect, and false after backend failure. The native ABI tests cover start-only/connect-only readiness in both orders and terminal failure. This reference does not implement remote-role preparation or prove a live backend connection.
 
 The complete coordinator/frontend launch context, verified stock packet sizing, TCP framing/compression, environment/admission semantics and a real server-character save/readback still require implementation and end-to-end verification. The prepared startup transition covers one identified remote-client path; it does not establish complete ladder role/bootstrap compatibility.
+
+## Original room request and server-header checks
+
+`NativeRoomJoinRequest` validates the original supported engine's 85-byte
+`0x68` request and can bind a freshly resolved room slot1..1024. It preserves
+all bytes except the two-byte slot. The string at24..84 is the room password;
+it must not be populated with the selected character name. Empty is expected
+for an explicitly password-free room. Its contents and the platform/session
+fields are never rewritten by this wrapper. Character data is a separate
+later transfer. The coordinator must still verify fresh account/ladder scope,
+room eligibility, the actual native environment and isolated server save.
+
+A bounded private Mac integration with the original empty password progressed
+past the previous B0 refusal: it sent native character-data commands and
+received loading messages followed by a record batch. A later reconnect used
+the newly downloaded full server character and reached an original item-reader
+assertion. No playable world, physical-device integration or user gameplay
+progress/save/reload is claimed by these observations.
