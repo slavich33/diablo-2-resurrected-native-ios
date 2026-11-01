@@ -20,12 +20,92 @@ public final class SaveTableLease {
     }
 }
 
+/// Prepare the independently downloaded server namespace before host/cloud
+/// startup, without an engine generation, signing environment or admission.
+/// The guard lasts for this process; detaching a peer never enables offline
+/// extensions or permits new unverified character writes in that namespace.
+public final class NativeServerSaveNamespace {
+    fileprivate let parent: SaveDirectory, parentURL: URL
+    fileprivate let snapshotName: String, characterName: String
+    fileprivate let workPath: String, commitPath: String
+    private var baselineSave: Data, baselineSidecar: Data?
+    private var failed = false
+
+    public convenience init(scope: LadderSaveScope, root: URL, snapshotDirectory: URL,
+                            characterName: String, selectedSave: VerifiedServerSave,
+                            previousSidecar: Data? = nil) throws {
+        let name = Array(characterName.utf8)
+        guard (2...15).contains(name.count), name.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) }),
+              selectedSave.metadata.fileName == characterName + ".d2s",
+              selectedSave.bytes.count >= 403, selectedSave.bytes.count <= 8 * 1024 * 1024 else {
+            throw NativeSaveCommitError.invalidScope
+        }
+        let parentURL = try scope.prepareDirectory(root: root), directory = snapshotDirectory.standardizedFileURL
+        let label = directory.lastPathComponent
+        guard directory.isFileURL, directory.deletingLastPathComponent().path == parentURL.path,
+              label.hasPrefix("snapshot-"), UUID(uuidString: String(label.dropFirst(9))) != nil else { throw NativeSaveCommitError.invalidScope }
+        let parent = try SaveDirectory(absolute: parentURL.path)
+        let folder = try parent.directory(label).directory(characterName)
+        let save = try folder.read(characterName + ".d2s", maximum: 8 * 1024 * 1024)!
+        let sidecar = try folder.read(characterName + ".d2rl", maximum: CharacterSidecar.maximumPayload + 44, optional: true)
+        guard save == selectedSave.bytes, sidecar == previousSidecar else { throw NativeSaveCommitError.readback }
+        self.init(parent: parent, parentURL: parentURL, snapshotName: label, characterName: characterName,
+                  commitPath: directory.path, save: save, sidecar: sidecar)
+    }
+
+    fileprivate init(parent: SaveDirectory, parentURL: URL, snapshotName: String, characterName: String,
+                     commitPath: String, save: Data, sidecar: Data?) {
+        self.parent = parent; self.parentURL = parentURL; self.snapshotName = snapshotName; self.characterName = characterName
+        self.commitPath = commitPath; workPath = commitPath + ".work"; baselineSave = save; baselineSidecar = sidecar
+    }
+
+    public static func prepareBeforeEngineStart(_ namespace: NativeServerSaveNamespace) throws {
+        SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
+        if SaveRegistry.namespace === namespace { return }
+        guard !SaveRegistry.hostStarted, SaveRegistry.mountedRoot == nil, SaveRegistry.namespace == nil,
+              SaveRegistry.current == nil, SaveRegistry.attempts.isEmpty else { throw NativeSaveCommitError.busy }
+        SaveRegistry.namespace = namespace
+    }
+
+    private func roots() throws -> (SaveDirectory, SaveDirectory) {
+        let fresh = try SaveDirectory(absolute: parentURL.path)
+        guard try parent.sameIdentity(as: fresh) else { throw NativeSaveCommitError.invalidScope }
+        return try (parent.directory(snapshotName + ".work"), parent.directory(snapshotName))
+    }
+    private func pair(_ root: SaveDirectory) throws -> (Data, Data?) {
+        let folder = try root.directory(characterName)
+        return try (folder.read(characterName + ".d2s", maximum: 8 * 1024 * 1024)!,
+            folder.read(characterName + ".d2rl", maximum: CharacterSidecar.maximumPayload + 44, optional: true))
+    }
+    fileprivate func validateMount(_ path: String) throws {
+        guard !failed, path == commitPath else { throw NativeSaveCommitError.invalidScope }
+        let fresh = try SaveDirectory(absolute: parentURL.path)
+        guard try parent.sameIdentity(as: fresh) else { throw NativeSaveCommitError.invalidScope }
+        let committed = try pair(parent.directory(snapshotName))
+        guard committed.0 == baselineSave, committed.1 == baselineSidecar else { throw NativeSaveCommitError.readback }
+    }
+    fileprivate func prepareUnadmitted(work: String, committed: String) throws {
+        try validateMount(committed)
+        guard work == workPath else { throw NativeSaveCommitError.invalidScope }
+        let current = try pair(roots().0)
+        guard current.0 == baselineSave, current.1 == baselineSidecar else { throw NativeSaveCommitError.noCompletion }
+    }
+    fileprivate func finishUnadmitted(committed: Bool) {
+        if committed { do { try validateMount(commitPath) } catch { failed = true } }
+    }
+    fileprivate func accepted(_ candidate: PreparedCharacterSave) {
+        baselineSave = candidate.saveBytes; baselineSidecar = candidate.sidecarBytes
+    }
+    fileprivate func fail() { failed = true }
+}
+
 /// Explicit receiver for one already admitted connection and isolated server
 /// snapshot. Installing this does NOT perform admission, select DM_SAVE, start
 /// the engine or upload progress. Default registry is empty and remains no-op.
 public final class NativeSaveCommitCoordinator {
     public let generation: UInt64
     private let session: CharacterSaveCommitSession
+    private let namespace: NativeServerSaveNamespace
     private let parent: SaveDirectory
     private let parentURL: URL
     private let snapshotName: String
@@ -51,15 +131,37 @@ public final class NativeSaveCommitCoordinator {
         let save = try character.read(session.characterName + ".d2s", maximum: 8 * 1024 * 1024)!
         let sidecar = try character.read(session.characterName + ".d2rl", maximum: CharacterSidecar.maximumPayload + 44, optional: true)
         try session.verifyCommittedSnapshot(save: save, sidecar: sidecar)
+        namespace = NativeServerSaveNamespace(parent: parent, parentURL: parentURL, snapshotName: name,
+            characterName: session.characterName, commitPath: directory.path, save: save, sidecar: sidecar)
         self.session = session; generation = session.generation; self.parent = parent
         self.parentURL = parentURL; snapshotName = name; commitPath = directory.path
         workPath = directory.path + ".work"; provider = acquireTable
+    }
+
+    public init(namespace: NativeServerSaveNamespace, session: CharacterSaveCommitSession,
+                acquireTable: @escaping (CharacterSaveMetadata) throws -> SaveTableLease) throws {
+        guard namespace.characterName == session.characterName else { throw NativeSaveCommitError.invalidScope }
+        try namespace.validateMount(namespace.commitPath)
+        let root = try namespace.parent.directory(namespace.snapshotName).directory(session.characterName)
+        try session.verifyCommittedSnapshot(save: root.read(session.characterName + ".d2s", maximum: 8 * 1024 * 1024)!,
+            sidecar: root.read(session.characterName + ".d2rl", maximum: CharacterSidecar.maximumPayload + 44, optional: true))
+        self.namespace = namespace; self.session = session; generation = session.generation
+        parent = namespace.parent; parentURL = namespace.parentURL; snapshotName = namespace.snapshotName
+        workPath = namespace.workPath; commitPath = namespace.commitPath; provider = acquireTable
+    }
+
+    public func prepareNamespaceBeforeEngineStart() throws {
+        try NativeServerSaveNamespace.prepareBeforeEngineStart(namespace)
     }
 
     public static func installAdmitted(_ coordinator: NativeSaveCommitCoordinator) throws {
         SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
         guard SaveRegistry.attempts.isEmpty, SaveRegistry.current == nil || SaveRegistry.current === coordinator else {
             throw NativeSaveCommitError.busy
+        }
+        guard SaveRegistry.namespace === coordinator.namespace,
+              SaveRegistry.mountedRoot == nil || SaveRegistry.mountedRoot == coordinator.commitPath else {
+            throw NativeSaveCommitError.invalidScope
         }
         SaveRegistry.current = coordinator
     }
@@ -76,7 +178,7 @@ public final class NativeSaveCommitCoordinator {
     public func receive(_ message: ControlMessage, generation: UInt64) throws {
         SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
         guard SaveRegistry.attempts.isEmpty else { throw NativeSaveCommitError.busy }
-        guard failure == 0 else { throw NativeSaveCommitError.failed }
+        guard failure == 0, SaveRegistry.current === self else { throw NativeSaveCommitError.failed }
         try session.receive(message, generation: generation)
     }
 
@@ -136,12 +238,13 @@ public final class NativeSaveCommitCoordinator {
                 if let candidate = attempt.candidate {
                     guard pair.0 == candidate.saveBytes, pair.1 == candidate.sidecarBytes else { throw NativeSaveCommitError.readback }
                     try session.complete(candidate, generation: generation, committed: true)
+                    namespace.accepted(candidate)
                     completionObserved = false; localCommits += 1
                 } else { try session.verifyCommittedSnapshot(save: pair.0, sidecar: pair.1) }
             } else if let candidate = attempt.candidate {
                 try session.complete(candidate, generation: generation, committed: false)
             }
-        } catch { failure = EIO; session.invalidate() }
+        } catch { failure = EIO; namespace.fail(); session.invalidate() }
     }
 
     fileprivate func note(path: String, sequence: UInt64, reason: Int32) {
@@ -149,26 +252,54 @@ public final class NativeSaveCommitCoordinator {
               path == workPath + "/" + session.characterName + "/" + session.characterName + ".d2s" else { return }
         completionObserved = true // Actual final bytes, not this order marker, select metadata.
     }
-    fileprivate func staleGeneration() { failure = ESTALE; session.invalidate() }
+    fileprivate func staleGeneration() { failure = ESTALE; namespace.fail(); session.invalidate() }
 }
 
 private final class SaveCommitAttempt {
     let coordinator: NativeSaveCommitCoordinator?
+    let namespace: NativeServerSaveNamespace?
     var sessionLocked = false
     var tables: SaveTableLease?
     var candidate: PreparedCharacterSave?
-    init(_ coordinator: NativeSaveCommitCoordinator?) { self.coordinator = coordinator }
+    init(_ coordinator: NativeSaveCommitCoordinator?, namespace: NativeServerSaveNamespace?) {
+        self.coordinator = coordinator; self.namespace = namespace
+    }
 }
 private enum SaveRegistry {
     static let lock = NSRecursiveLock()
     static var current: NativeSaveCommitCoordinator?
+    static var namespace: NativeServerSaveNamespace?
+    static var mountedRoot: String?
+    static var hostStarted = false
     static var attempts: [SaveCommitAttempt] = []
 }
 
 @_cdecl("dm_online_d2s_completion_enabled")
 public func nativeSaveCompletionEnabled() -> Int32 {
     SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
-    return SaveRegistry.current == nil ? 0 : 1
+    return SaveRegistry.namespace == nil ? 0 : 1
+}
+
+@_cdecl("dm_online_save_isolated")
+public func nativeSaveIsolated() -> Int32 { nativeSaveCompletionEnabled() }
+
+@_cdecl("dm_online_save_mount_validate")
+public func nativeSaveMountValidate(_ path: UnsafePointer<CChar>?) -> Int32 {
+    SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
+    guard let namespace = SaveRegistry.namespace else { return 0 }
+    guard let path, let text = String(validatingCString: path) else { return EINVAL }
+    do { try namespace.validateMount(text); return 0 } catch { return EACCES }
+}
+
+@_cdecl("dm_online_save_mounted")
+public func nativeSaveMounted(_ path: UnsafePointer<CChar>?) {
+    SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }
+    if let path, let text = String(validatingCString: path) { SaveRegistry.mountedRoot = text }
+}
+
+@_cdecl("dm_online_save_host_started")
+public func nativeSaveHostStarted() {
+    SaveRegistry.lock.lock(); defer { SaveRegistry.lock.unlock() }; SaveRegistry.hostStarted = true
 }
 
 @_cdecl("dm_online_d2s_completed")
@@ -181,13 +312,17 @@ public func nativeSaveCompleted(_ path: UnsafePointer<CChar>?, _ sequence: UInt6
 @_cdecl("dm_online_save_prepare")
 public func nativeSavePrepare(_ work: UnsafePointer<CChar>?, _ committed: UnsafePointer<CChar>?) -> Int32 {
     SaveRegistry.lock.lock() // Balanced by the C filesystem's same-thread finished callback.
-    let attempt = SaveCommitAttempt(SaveRegistry.current); SaveRegistry.attempts.append(attempt)
-    guard let coordinator = attempt.coordinator else { return 0 }
+    let attempt = SaveCommitAttempt(SaveRegistry.current, namespace: SaveRegistry.namespace); SaveRegistry.attempts.append(attempt)
+    guard attempt.coordinator != nil || attempt.namespace != nil else { return 0 }
     guard let work, let committed, let w = String(validatingCString: work), let c = String(validatingCString: committed) else { return EINVAL }
-    do { try coordinator.begin(attempt, work: w, committed: c); return 0 }
+    do {
+        if let coordinator = attempt.coordinator { try coordinator.begin(attempt, work: w, committed: c) }
+        else { try attempt.namespace?.prepareUnadmitted(work: w, committed: c) }
+        return 0
+    }
     catch SaveCommitSessionError.waitingForMetadata { return EAGAIN }
     catch NativeSaveCommitError.noCompletion { return EAGAIN }
-    catch NativeSaveCommitError.generation { coordinator.staleGeneration(); return ESTALE }
+    catch NativeSaveCommitError.generation { attempt.coordinator?.staleGeneration(); return ESTALE }
     catch let error as SaveIOError { return error.code }
     catch { return EIO }
 }
@@ -198,7 +333,8 @@ public func nativeSaveFinished(_ work: UnsafePointer<CChar>?, _ committed: Unsaf
     // must not be invoked manually from a network/main-thread callback.
     _ = work; _ = committed
     guard let attempt = SaveRegistry.attempts.popLast() else { return }
-    attempt.coordinator?.finish(attempt, committed: success != 0)
+    if let coordinator = attempt.coordinator { coordinator.finish(attempt, committed: success != 0) }
+    else { attempt.namespace?.finishUnadmitted(committed: success != 0) }
     SaveRegistry.lock.unlock()
 }
 

@@ -27,8 +27,10 @@ private func metadata(_ data: Data) throws -> CharacterSaveMetadata {
 }
 
 private func run() throws {
-    guard CommandLine.arguments.count == 2 || (CommandLine.arguments.count == 3 && CommandLine.arguments[2] == "--readback-failure") else { throw CheckError.arguments }
-    let corruptReadback = CommandLine.arguments.count == 3
+    guard CommandLine.arguments.count == 2 || (CommandLine.arguments.count == 3 && ["--readback-failure", "--late-namespace", "--detach"].contains(CommandLine.arguments[2])) else { throw CheckError.arguments }
+    let corruptReadback = CommandLine.arguments.last == "--readback-failure"
+    let lateNamespace = CommandLine.arguments.last == "--late-namespace"
+    let healthyDetach = CommandLine.arguments.last == "--detach"
     let manager = FileManager.default
     let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).appendingPathComponent("save-test-" + UUID().uuidString)
     try manager.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -49,28 +51,6 @@ private func run() throws {
         let sidecar = file(snapshot, ".d2rl")
         return try (Data(contentsOf: file(snapshot, ".d2s")), manager.fileExists(atPath: sidecar.path) ? Data(contentsOf: sidecar) : nil)
     }
-    try require(nativeSaveCompletionEnabled() == 0, "default-unbound")
-    try require(snapshot.path.withCString { fixture_mount($0) } == 0, "real-save-mount")
-    fixture_capture_tables()
-    var boundInfo = dm_net_itemstatcost_info()
-    try require(dm_net_itemstatcost_copy(3, 0, nil, 0, &boundInfo) == DM_NET_TABLE_READY, "bind-actual-table-generation")
-    let boundTableGeneration = boundInfo.generation
-    var acquired = 0, released = 0, releaseFailure = false
-    let session = try CharacterSaveCommitSession(generation: 7, characterName: fixtureName, initialSave: verified,
-        environment: EnvironmentMetadata(rootTexts: [Data("own-fixture".utf8), Data()]), clientPlugins: [], signingKey: key)
-    let coordinator = try NativeSaveCommitCoordinator(scope: scope, root: root, snapshotDirectory: snapshot, session: session) { metadata in
-        let native = try NativeItemStatCostCapture.acquireLease(for: metadata, expectedGeneration: boundTableGeneration); acquired += 1
-        return SaveTableLease(snapshot: native.snapshot) {
-            do { try native.release() } catch { releaseFailure = true }
-            released += 1
-        }
-    }
-    // Explicit synthetic admitted fixture; no real admission is asserted.
-    try NativeSaveCommitCoordinator.installAdmitted(coordinator)
-    defer { try? NativeSaveCommitCoordinator.detach(generation: 7) }
-    func receive(_ data: Data) throws {
-        for message in try metadata(data).controlMessages() { try coordinator.receive(message, generation: 7) }
-    }
     func write(_ data: Data, keepOpen: Bool = false) throws {
         let result = data.withUnsafeBytes { raw in
             ("save:/" + fixtureName + "/" + fixtureName + ".d2s").withCString {
@@ -78,6 +58,59 @@ private func run() throws {
             }
         }
         try require(result == 0, "original-hle-write")
+    }
+    try require(nativeSaveCompletionEnabled() == 0, "default-unbound")
+    let namespace = try NativeServerSaveNamespace(scope: scope, root: root, snapshotDirectory: snapshot,
+        characterName: fixtureName, selectedSave: verified)
+    fixture_install_legacy_probes()
+    if lateNamespace {
+        try require(snapshot.path.withCString { fixture_mount($0) } == 0 && fixture_commit() == 0, "ordinary-offline-mount")
+        try require(fixture_legacy_calls() > 0, "offline-hooks-still-work")
+        do { try NativeServerSaveNamespace.prepareBeforeEngineStart(namespace); throw CheckError.failed("late-namespace-was-accepted") }
+        catch NativeSaveCommitError.busy {}
+        try require(nativeSaveIsolated() == 0 && Data(contentsOf: offline) == untouched, "late-bind-preserves-offline-mode")
+        print("Native namespace: late isolation rejected after host/save startup; ordinary offline hooks and original bytes preserved.")
+        return
+    }
+    try NativeServerSaveNamespace.prepareBeforeEngineStart(namespace)
+    let outside = root.appendingPathComponent("must-not-be-created")
+    try require(outside.path.withCString { fixture_mount($0) } != 0 && !manager.fileExists(atPath: outside.path), "wrong-root-rejected-before-seeding")
+    fixture_fail_next(1)
+    try require(snapshot.path.withCString { fixture_mount($0) } != 0 && fixture_commit() != 0, "online-mount-clone-failure-never-falls-back-readonly")
+    try require(snapshot.path.withCString { fixture_mount($0) } == 0, "real-isolated-save-mount")
+    let cloud = root.appendingPathComponent("unused-local-cloud")
+    cloud.path.withCString { fixture_cloud_boot($0) }
+    try require(fixture_cloud_probe_calls() == 0 && !manager.fileExists(atPath: cloud.path), "actual-cloud-boot-guard")
+    let unadmitted = save(99)
+    try write(unadmitted)
+    try require(fixture_commit() != 0, "unadmitted-character-change-refused")
+    try require(try pair().0 == initial && pair().1 == nil && Data(contentsOf: file(work, ".d2s")) == unadmitted,
+                "unadmitted-refusal-preserves-committed-and-pending-bytes")
+    try write(initial)
+    try require(fixture_commit() == 0 && fixture_legacy_calls() == 0, "unadmitted-unchanged-commit-without-offline-hooks")
+    fixture_capture_tables()
+    var boundInfo = dm_net_itemstatcost_info()
+    try require(dm_net_itemstatcost_copy(3, 0, nil, 0, &boundInfo) == DM_NET_TABLE_READY, "bind-actual-table-generation")
+    let boundTableGeneration = boundInfo.generation
+    var acquired = 0, released = 0, releaseFailure = false
+    let session = try CharacterSaveCommitSession(generation: 7, characterName: fixtureName, initialSave: verified,
+        environment: EnvironmentMetadata(rootTexts: [Data("own-fixture".utf8), Data()]), clientPlugins: [], signingKey: key)
+    let coordinator = try NativeSaveCommitCoordinator(namespace: namespace, session: session) { metadata in
+        let native = try NativeItemStatCostCapture.acquireLease(for: metadata, expectedGeneration: boundTableGeneration); acquired += 1
+        return SaveTableLease(snapshot: native.snapshot) {
+            do { try native.release() } catch { releaseFailure = true }
+            released += 1
+        }
+    }
+    do {
+        try coordinator.receive(metadata(save(1)).controlMessages()[0], generation: 7)
+        throw CheckError.failed("metadata-before-admission-was-accepted")
+    } catch NativeSaveCommitError.failed {}
+    // Explicit synthetic admitted fixture; no real admission is asserted.
+    try NativeSaveCommitCoordinator.installAdmitted(coordinator)
+    defer { try? NativeSaveCommitCoordinator.detach(generation: 7) }
+    func receive(_ data: Data) throws {
+        for message in try metadata(data).controlMessages() { try coordinator.receive(message, generation: 7) }
     }
     let first = save(1)
     try write(first, keepOpen: true)
@@ -115,6 +148,7 @@ private func run() throws {
         try require(coordinator.failureCode != 0 && coordinator.localCommitCount == 2, "independent-readback-rejects-corrupted-commit")
         try require(try pair().0 != changed && Data(contentsOf: offline) == untouched, "owned-corruption-fixture-only")
         try require(acquired == released && !releaseFailure, "readback-failure-releases-table-pin")
+        try require(fixture_legacy_calls() == 0 && fixture_cloud_probe_calls() == 0, "readback-mode-isolation")
         print("Native coupled save readback: post-swap corruption rejected despite C commit success; no local acceptance, table pin released, offline sentinel unchanged. Synthetic data only.")
         return
     }
@@ -139,6 +173,17 @@ private func run() throws {
     try require(fixture_commit() == 0 && coordinator.localCommitCount == 3, "retry-after-safe-scope-restoration")
     try require(acquired == released && !releaseFailure && coordinator.failureCode == 0, "all-native-table-leases-balanced")
     let fourth = save(4), beforeReload = try pair()
+    if healthyDetach {
+        try NativeSaveCommitCoordinator.detach(generation: 7)
+        try require(nativeSaveIsolated() == 1 && fixture_commit() == 0, "healthy-detach-retains-unchanged-pair")
+        try write(fourth)
+        try require(fixture_commit() != 0, "healthy-detach-refuses-new-unsigned-character")
+        try require(try pair().0 == beforeReload.0 && pair().1 == beforeReload.1 && Data(contentsOf: offline) == untouched,
+                    "healthy-detach-keeps-last-signed-and-offline-pairs")
+        try require(fixture_legacy_calls() == 0 && fixture_cloud_probe_calls() == 0, "healthy-detach-never-enables-offline-hooks")
+        print("Native namespace: healthy peer detach retains signed predecessor and offline/cloud isolation; new unsigned changes are deferred. Synthetic data only.")
+        return
+    }
     try write(fourth); try receive(fourth)
     fixture_capture_tables() // Same fixture bytes, a different published generation.
     try require(fixture_commit() != 0 && coordinator.failureCode != 0, "changed-generation-must-not-rebind-silently")
@@ -147,6 +192,9 @@ private func run() throws {
     var info = dm_net_itemstatcost_info()
     try require(dm_net_itemstatcost_copy(3, 0, nil, 0, &info) == DM_NET_TABLE_READY, "capture-not-left-pinned")
     try require(try Data(contentsOf: offline) == untouched, "final-offline-preservation")
+    try NativeSaveCommitCoordinator.detach(generation: 7)
+    try require(nativeSaveIsolated() == 1 && fixture_commit() != 0, "detach-cannot-enable-unsigned-or-offline-fallback")
+    try require(fixture_legacy_calls() == 0 && fixture_cloud_probe_calls() == 0, "all-offline-extension-and-cloud-hooks-skipped")
     print("Native coupled save commit: real HLE IO + Swift metadata/seals/history + bound native table pins + atomic readback, 3 commits; defer/clone/swap/symlink/retry/stale-generation checks passed. No server admission or upload.")
 }
 

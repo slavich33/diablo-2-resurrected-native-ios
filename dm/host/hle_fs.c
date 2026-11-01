@@ -30,6 +30,10 @@ __attribute__((weak)) int dm_online_d2s_completion_enabled(void) { return 0; }
 __attribute__((weak)) void dm_online_d2s_completed(const char *path, uint64_t sequence, int reason) { (void)path; (void)sequence; (void)reason; }
 __attribute__((weak)) int dm_online_save_prepare(const char *workdir, const char *commitdir) { (void)workdir; (void)commitdir; return 0; }
 __attribute__((weak)) void dm_online_save_finished(const char *workdir, const char *commitdir, int committed) { (void)workdir; (void)commitdir; (void)committed; }
+__attribute__((weak)) int dm_online_save_isolated(void) { return 0; }
+__attribute__((weak)) int dm_online_save_mount_validate(const char *commitdir) { (void)commitdir; return 0; }
+__attribute__((weak)) void dm_online_save_mounted(const char *commitdir) { (void)commitdir; }
+__attribute__((weak)) void dm_online_save_host_started(void) {}
 
 #define RES_PATH_NOT_FOUND 0x202u      // fs 模块 2，描述 1 | fs module 2, description 1
 #define RES_PATH_EXISTS    0x402u      // fs 模块 2，描述 2 | fs module 2, description 2
@@ -115,7 +119,10 @@ static int rm_tree(const char *p);
 static Result mount_ex(const char *name, const char *dir, int ro, int txn) {
     PATH_LOCK(); pthread_mutex_lock(&g_lock);
     for (int i = 0; i < g_nmnt; i++)
-        if (!strcmp(g_mnt[i].name, name)) { pthread_mutex_unlock(&g_lock); return RES_OK; }
+        if (!strcmp(g_mnt[i].name, name)) {
+            int wrong_root = txn && dm_online_save_isolated() && strcmp(g_mnt[i].commit, dir);
+            pthread_mutex_unlock(&g_lock); return wrong_root ? RES_FAIL : RES_OK;
+        }
     if (g_nmnt >= MAX_MOUNT) die("挂载表满");
     strlcpy(g_mnt[g_nmnt].name, name, sizeof g_mnt[0].name);
     g_mnt[g_nmnt].ro = ro; g_mnt[g_nmnt].overlay[0] = 0; g_mnt[g_nmnt].commit[0] = 0;
@@ -129,6 +136,11 @@ static Result mount_ex(const char *name, const char *dir, int ro, int txn) {
         if (!access(work, F_OK) && rm_tree(work)) why = "清不掉上次残留的工作目录";
         else if (!access(neu, F_OK) && rm_tree(neu)) why = "清不掉上次残留的 .new";
         else if (dm_fs_test_fail("mountclone") || clonefile(dir, work, 0)) why = "克隆工作目录失败";
+        if (why && dm_online_save_isolated()) {
+            txn_err = errno ? errno : EIO;
+            memset(&g_mnt[g_nmnt], 0, sizeof g_mnt[g_nmnt]);
+            pthread_mutex_unlock(&g_lock); front_save_failed(txn_err); return RES_FAIL;
+        }
         if (why) { txn_err = errno ? errno : EIO; g_mnt[g_nmnt].ro = 1; strlcpy(g_mnt[g_nmnt].dir, dir, sizeof g_mnt[0].dir);
             LOG("【红】存档事务：%s（%s，errno=%d）——改为只读挂载已提交目录 %s：本局存档写不进去，已提交版本不变", why, work, txn_err, dir); }
         else {
@@ -137,6 +149,7 @@ static Result mount_ex(const char *name, const char *dir, int ro, int txn) {
             strlcpy(g_mnt[g_nmnt].dir, work, sizeof g_mnt[0].dir); }
     } else strlcpy(g_mnt[g_nmnt].dir, dir, sizeof g_mnt[0].dir);
     g_nmnt++;
+    if (txn) dm_online_save_mounted(dir);
     pthread_mutex_unlock(&g_lock);
     if (txn_err) front_save_failed(txn_err);
     if (!ro && !txn) mkdir(dir, 0755);
@@ -449,6 +462,10 @@ HLE_FORCE("_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE", "fsp-srv；存档 �
     const char *d = getenv("DM_SAVE");
     if (!d) die("未设 DM_SAVE：请指向一份存档目录的可写副本");
     char dd[1024]; strlcpy(dd, d, sizeof dd); size_t L = strlen(dd); while (L > 1 && dd[L - 1] == '/') dd[--L] = 0;   // 去掉结尾斜杠（.work / .new 拼在同级） | strip trailing slashes (.work / .new are appended at the same level)
+    int online_error = dm_online_save_mount_validate(dd);
+    if (online_error) { front_save_failed(online_error > 0 ? online_error : EIO); return RES_FAIL; }
+    // Offline seed/extension data must never enter a server-authoritative tree.
+    if (dm_online_save_isolated()) return mount_ex(name, dd, 0, 1);
     stash_seed(dd);
     low_vision_off(dd);
     settings_seed(dd); settings_lang_apply(dd);
@@ -466,9 +483,13 @@ uint64_t dm_fs_commit_count(void) { return atomic_load(&g_save_commits); }
 HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整树 clone 后与已提交目录原子互换（renamex_np RENAME_SWAP）", Result, h_fs_Commit, const char *name) {
     PATH_LOCK(); pthread_mutex_lock(&g_lock);
     int i = 0; while (i < g_nmnt && strcmp(g_mnt[i].name, name)) i++;
-    if (i == g_nmnt || !g_mnt[i].commit[0]) { pthread_mutex_unlock(&g_lock); return RES_OK; }   // 非事务挂载：无可提交 | non-transactional mount: nothing to commit
+    if (i == g_nmnt || !g_mnt[i].commit[0]) {
+        int isolated = dm_online_save_isolated(); pthread_mutex_unlock(&g_lock);
+        return isolated ? RES_FAIL : RES_OK;
+    }   // An isolated server namespace must have a writable transaction.
     uint64_t tc0 = clock_gettime_nsec_np(CLOCK_MONOTONIC), tw0 = atomic_exchange(&g_txn_first_ns, 0);
-    for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
+    int isolated = dm_online_save_isolated();
+    if (!isolated) for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
     if (dm_online_d2s_completion_enabled() && !atomic_load(&g_save_poison)) {
         int writers = 0;
         for (int k = 0; k < 65536; ++k) writers += g_fsave[k] && (g_fmode[k] & (MODE_WRITE | MODE_APPEND));
@@ -536,7 +557,7 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     }
     // Release the remote lease before the independent post-commit observer.
     if (online_prepared) dm_online_save_finished(g_mnt[i].dir, g_mnt[i].commit, r == RES_OK);
-    if (r == RES_OK && g_dm_save_commit_hook) g_dm_save_commit_hook(g_mnt[i].commit);   // iCloud snapshot; mount/path locks remain held
+    if (r == RES_OK && !isolated && g_dm_save_commit_hook) g_dm_save_commit_hook(g_mnt[i].commit);   // Offline iCloud snapshot only.
     pthread_mutex_unlock(&g_lock);
     return r;
 }

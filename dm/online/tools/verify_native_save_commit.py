@@ -20,11 +20,13 @@ def main():
     env = os.environ.copy()
     env['TMPDIR'] = str(scratch)
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], env=env, text=True).strip()
-    inputs = [root / 'online/tools/SaveCommitIntegration/driver.c', root / 'host/tests/t_fs_stub.c', root / 'host/dm_i18n.c']
+    inputs = [root / 'online/tools/SaveCommitIntegration/driver.c', root / 'online/tools/SaveCommitIntegration/cloud_stubs.c',
+              root / 'host/tests/t_fs_stub.c', root / 'host/dm_i18n.c', root / 'ios/Sources/cloud_ios.m']
     objects = []
     for source in inputs:
         output = scratch / (source.stem + '.o')
-        subprocess.run(['xcrun', '--sdk', 'macosx', 'clang', '-O1', '-Wno-unused-function', '-I', str(root / 'host'),
+        objc = ['-fobjc-arc', '-fblocks'] if source.suffix == '.m' else []
+        subprocess.run(['xcrun', '--sdk', 'macosx', 'clang', '-O1', *objc, '-Wno-unused-function', '-I', str(root / 'host'),
                         '-isysroot', sdk, '-c', str(source), '-o', str(output)], env=env, check=True, timeout=60)
         objects.append(str(output))
     sources = sorted(map(str, (root / 'online/Sources/ReimaginedClient').glob('*.swift')))
@@ -32,9 +34,11 @@ def main():
     subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-O', '-sdk', sdk, '-module-name', 'NativeSaveCommitCheck',
                     '-import-objc-header', str(root / 'online/tools/SaveCommitIntegration/driver.h'), *sources,
                     str(root / 'ios/Sources/dm_online_tables.swift'), str(root / 'online/tools/SaveCommitIntegration/main.swift'),
-                    *objects, '-framework', 'Security', '-o', str(executable)], env=env, check=True, timeout=60)
+                    *objects, '-framework', 'Security', '-framework', 'Network', '-o', str(executable)], env=env, check=True, timeout=60)
     subprocess.run([str(executable), str(scratch)], env=env, check=True, timeout=45)
     subprocess.run([str(executable), str(scratch), '--readback-failure'], env=env, check=True, timeout=45)
+    subprocess.run([str(executable), str(scratch), '--late-namespace'], env=env, check=True, timeout=45)
+    subprocess.run([str(executable), str(scratch), '--detach'], env=env, check=True, timeout=45)
 
 
 if __name__ == '__main__':

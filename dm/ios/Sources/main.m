@@ -24,6 +24,7 @@ static int g_nofile_was, g_nofile_now;   // 启动时的文件描述符软上限
 #include <arpa/inet.h>
 void dm_host_shutdown(const char *why);   // 宿主优雅退出（dm/host/hle_lifecycle.c） | Graceful host exit (dm/host/hle_lifecycle.c)
 #include "front.h"                        // front_game_res（全屏输出分辨率） | front_game_res (full-screen output resolution)
+#include "dm_save_completion.h"
 #include "../../host/romfs_validate.h"
 #include "../../host/dm_i18n.h"
 static NSString *T(const char *k) { return @(dm_ui(k)); }   // 我们自己的界面文字（中英表 dm/i18n/ui_text.tsv，语言跟原版设置走） | our own UI text (Chinese-English string table dm/i18n/ui_text.tsv, language follows the original game's setting)
@@ -714,6 +715,7 @@ static void boot_begin(void) {
     else plog("boot: DM_NO_PRELOAD——宿主装载不提前（对照）");
 }
 static void *boot_thread(void *arg) {
+    dm_online_save_host_started(); // Before cloud startup; late namespace changes are forbidden.
     (void)arg;
     g_T[5] = since_start();
     char **argv = g_boot_argv;

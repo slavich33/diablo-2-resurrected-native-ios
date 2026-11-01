@@ -2,6 +2,7 @@
 // Bootstrap: after loading the modules, initialize the SDK runtime in the real order of nn::init::Start (sdk+0x2b0470) in the SDK, then enter nnMain.
 #include "dm.h"
 #include "front.h"
+#include "dm_save_completion.h"
 #include <stdatomic.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
@@ -124,6 +125,7 @@ static pthread_key_t g_race_keys[512];
 static unsigned g_race_n, g_race_want;
 static void *keyrace_thread(void *unused);
 static void host_preload(int argc, char **argv) {
+    dm_online_save_host_started();
     g_t0_ns = proc_start_mono_ns();
     flags_init();
     dm_prof_mark("⓪ 进程创建 → 宿主 main（dyld）");
@@ -181,6 +183,7 @@ static void *keyrace_thread(void *unused) {
 // (DM_ROMFS / DM_SAVE / DM_TEMP etc. and the cwd -- loading and the prefetch start read them); the arguments must be identical, item by item, to those of the later dm_main (a difference reports a failure and exits).
 // May be called only once; if not called, loading is synchronous inside main and behavior is exactly as before this call existed. Does not depend on UIKit / Metal.
 void dm_host_preload_start(int argc, char **argv) {
+    dm_online_save_host_started();
     if (atomic_exchange(&g_pre.started, 1)) return;
     g_pre.argc = argc; g_pre.argv = calloc((size_t)argc + 1, sizeof(char *));
     for (int i = 0; i < argc; i++) g_pre.argv[i] = strdup(argv[i]);
@@ -190,6 +193,7 @@ void dm_host_preload_start(int argc, char **argv) {
 #include <TargetConditionals.h>
 int dm_app_bootstrap(int *argc, char ***argv);   // app_mac.m：包成 .app 双击起时备好环境与参数；命令行起原样 | app_mac.m: when packaged as an .app and started by double-click, prepare the environment and arguments; command-line starts are unchanged
 int main(int argc, char **argv) {
+    dm_online_save_host_started();
 #if TARGET_OS_OSX   // iOS 包也编这个文件（入口由外壳调），那边没有 app_mac.m | The iOS package compiles this file too (the entry is called by the shell); there is no app_mac.m on that side
     if (dm_app_bootstrap(&argc, &argv)) { void dm_cloud_boot(void); dm_cloud_boot(); }   // App 形态：挂存档之前先做一次 iCloud 同步（同 iOS 壳的启动次序）；取不到容器 / 测试存档时它自己记一行就返回 | App form: do one iCloud sync before mounting the save (same startup order as the iOS shell); when the container cannot be obtained / with a test save it logs one line and returns
 #endif

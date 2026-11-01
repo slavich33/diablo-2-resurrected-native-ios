@@ -23,6 +23,12 @@ void dm_online_d2s_completed(const char *path, uint64_t sequence, int reason);
 // A linked coordinator can hold its namespace/generation lease across the pair.
 int dm_online_save_prepare(const char *workdir, const char *commitdir);
 void dm_online_save_finished(const char *workdir, const char *commitdir, int committed);
+// Namespace isolation is prepared BEFORE any host/cloud/save startup, without
+// granting admission. It lasts for the process, including after peer detach.
+int dm_online_save_isolated(void);
+int dm_online_save_mount_validate(const char *commitdir);
+void dm_online_save_mounted(const char *commitdir);
+void dm_online_save_host_started(void);
 #ifdef __cplusplus
 }
 #endif

@@ -38,7 +38,22 @@ static void (*table_observer)(const uint64_t *);
 int gate_obs_present(int id) { return id == OBS_NET_ITEMSTATCOST; }
 void gate_obs_set(int id, void (*fn)(const uint64_t *)) { assert(id == OBS_NET_ITEMSTATCOST); table_observer = fn; }
 static uint64_t writer;
-int fixture_mount(const char *directory) { setenv("DM_SAVE", directory, 1); setenv("DM_TOUCH_DEFAULTS", "0", 1); return (int)h_fs_MountSave("save", NULL); }
+static int legacy_calls;
+static void legacy_probe(const char *path) { (void)path; ++legacy_calls; }
+void fixture_install_legacy_probes(void) {
+    for (int i = 0; i < 5; ++i) g_dm_pre_commit_hook[i] = legacy_probe;
+    g_dm_save_commit_hook = legacy_probe; g_dm_mount_seed_hook = legacy_probe;
+}
+int fixture_legacy_calls(void) { return legacy_calls; }
+int fixture_mount(const char *directory) {
+    dm_online_save_host_started();
+    setenv("DM_SAVE", directory, 1); setenv("DM_TOUCH_DEFAULTS", "1", 1);
+    return (int)h_fs_MountSave("save", NULL);
+}
+void fixture_cloud_boot(const char *directory) {
+    extern void dm_cloud_boot(void);
+    setenv("DM_TEST_ICLOUD_DIR", directory, 1); dm_cloud_boot(); unsetenv("DM_TEST_ICLOUD_DIR");
+}
 int fixture_write(const char *path, const void *bytes, size_t count, int keep_open) {
     assert(!writer);
     Result result = h_fs_OpenFile(&writer, path, MODE_WRITE);

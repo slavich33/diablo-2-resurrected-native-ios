@@ -27,6 +27,7 @@
 #include <stdatomic.h>
 #include "front.h"
 #include "hle.h"
+#include "dm_save_completion.h"
 
 int dm_cloud_sync(const char *save, const char *cloud, const char *bak, const char *statef, int allow_down, uint64_t now_ms, int (*ready)(const char *unit));
 int dm_cloud_inbox_add(const char *save, const char *statef, const char *pack); uint64_t dm_cloud_pack_stamp(const char *pack);
@@ -111,6 +112,7 @@ static void upload_snap(NSString *snap, const char *why) {   // 在 g_q 上调 |
     [NSFileManager.defaultManager removeItemAtPath:snap error:nil];
 }
 static void on_commit(const char *commit_dir) {
+    if (dm_online_save_isolated()) return;
     static unsigned seq; NSString *snap = [NSString stringWithFormat:@"%@.cloudsnap%u", g_save, ++seq];
     [NSFileManager.defaultManager removeItemAtPath:snap error:nil];
     if (clonefile(commit_dir, snap.fileSystemRepresentation, 0)) { LOG("【红】iCloud 同步：存档快照失败 errno=%d，这次提交不上传", errno); return; }
@@ -281,6 +283,7 @@ static int first_listing_ok(double deadline) {
     return ok;
 }
 void dm_cloud_boot(void) {
+    if (dm_online_save_isolated()) return;
     const char *sv = getenv("DM_SAVE"), *sub = getenv("DM_TEST_ICLOUD_SUB"), *ldir = getenv("DM_TEST_ICLOUD_DIR"), *lroot = getenv("DM_TEST_ICLOUD_ROOT"); if (!sv) return;
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *save = @(sv); int real = [save.stringByStandardizingPath isEqualToString:[doc stringByAppendingPathComponent:@"save"].stringByStandardizingPath];
