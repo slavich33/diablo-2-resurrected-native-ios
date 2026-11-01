@@ -67,6 +67,27 @@ A bounded isolated native Mac experiment using a loopback TCP fixture confirmed 
 
 There is one engine consumer per receive channel. Received spans stay valid until that channel's next poll. Asynchronous close retains the current span; detach requires quiescent consumers. Input is copied before a producer returns.
 
+## Bound session monitor
+
+The exact-build call at `main+0x2c2bac` invokes the original per-frame backend
+monitor at `0x179b9c`. A false result branches directly into native graceful
+shutdown. It is a separate check from the packet driver's connected/failed
+queries; a real peer can deliver player state while this monitor still ends
+the native session.
+
+With `DM_NET_ENGINE_BRIDGE=1`, SVC `0xa1` delegates this one check to the
+explicitly bound coordinator's connection state. It returns true only for a
+connected, nonfailed binding in an isolated server-save namespace. Pending,
+failed and nonisolated bindings return false; they never fall through to the
+old backend. Unbound calls invoke the unchanged original one-argument monitor.
+The native exit flags, error handling and shutdown path remain intact.
+
+The coordinator must authenticate and validate its peer before activating the
+binding, as described above. This monitor does not create a socket, issue an
+admission acknowledgement, accept a server profile or declare a game joined.
+The independent ARM64 engine harness checks unbound forwarding, not-ready,
+active, isolation-failure and closed-session behavior.
+
 ## Checks and limits
 
 The independent ARM64 assembly test covers original prologue/conditional-branch continuation, status and close results, hidden output, padding canaries, remote routing, retry retention, span lifetime across close, stale generations and overflow. The start/connect fixtures enter the real assembly `dm_gate` and verify all nine argument positions, x8, NZCV, caller SP/LR and both bound/unbound paths. These checks also pass AddressSanitizer/UndefinedBehaviorSanitizer. The test's small dispatcher is independent of production module lookup; the native game run separately checks the real metadata dispatcher.
@@ -98,3 +119,11 @@ received loading messages followed by a record batch. A later reconnect used
 the newly downloaded full server character and reached an original item-reader
 assertion. No playable world, physical-device integration or user gameplay
 progress/save/reload is claimed by these observations.
+
+A subsequent real-server Mac run with the extended item/state readers and
+bound session monitor completed its full20-second transport window without
+the premature native exit. Original native HID input moved the player; the
+final position applied by the original engine matched the new position sent
+by the server. This is actual engine/input/network evidence. Its screenshots
+were solid magenta because the matching shader library directory was absent;
+it does not establish a rendered playable world or iPhone ladder support.

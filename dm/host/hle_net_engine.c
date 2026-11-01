@@ -5,6 +5,7 @@
 // argument. Keep it explicitly, as in dm_dropfilter.c's guest-call shim.
 #include "dm_net_engine.h"
 #include "dm_net_binding.h"
+#include "dm_save_completion.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +130,15 @@ void svc_net_client_idle(uint64_t *regs, uint64_t original_body) {
     if (dm_net_remote_can_connect(regs[0], &can_connect)) regs[0] = can_connect;
     // Identical displaced instructions to hard close: ldr w8,[x0,#0x14];cmp w8,#1.
     else forward_entry(regs, original_body, dm_net_resume_hard_close);
+}
+
+void svc_net_session_poll(uint64_t *regs, uint64_t original_target, uint64_t client) {
+    int connected = 0, failed = 0;
+    if (dm_net_remote_status(client, &connected, &failed)) {
+        regs[0] = connected && !failed && dm_online_save_isolated() == 1;
+        return;
+    }
+    regs[0] = ((uint32_t (*)(uint64_t))(uintptr_t)original_target)(regs[0]);
 }
 
 void svc_net_client_poll(uint64_t *regs) {

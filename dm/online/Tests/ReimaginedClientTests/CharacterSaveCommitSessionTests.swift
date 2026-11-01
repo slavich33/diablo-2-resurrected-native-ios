@@ -157,6 +157,50 @@ final class CharacterSaveCommitSessionTests: XCTestCase {
         try sidecar.verifySignedVersion105Save(next, expectedCharacterName: fixtureName, expectedPublicKey: key.publicKey.rawRepresentation)
     }
 
+    func testDedicatedServerSnapshotStartsExplicitLocalHistoryWithoutChangingDownloadedProgress() throws {
+        let key = P256.Signing.PrivateKey(), ladder = UUID(), baseline = try verified(save(1), version: 19)
+        let manifest = ServerSaveManifest(ladderID: ladder, serverAuthoritative: true, files: [baseline.metadata])
+        let session = try CharacterSaveCommitSession.serverOwnedSnapshot(generation: 7, characterName: fixtureName,
+            initialSave: baseline, manifest: manifest, ladderID: ladder,
+            environment: EnvironmentMetadata(), clientPlugins: [], signingKey: key)
+        XCTAssertNil(try session.prepare(baseline.bytes, generation: 7, table: table(), timestamp: 100))
+        let next = save(2)
+        XCTAssertThrowsError(try session.prepare(next, generation: 7, table: table(), timestamp: 101))
+        try receive(metadata(next), session)
+        let candidate = try XCTUnwrap(session.prepare(next, generation: 7, table: table(), timestamp: 102))
+        let sidecar = try CharacterSidecar.decode(candidate.sidecarBytes)
+        XCTAssertEqual(candidate.saveBytes, next)
+        XCTAssertEqual(sidecar.historyCounter, 1)
+        XCTAssertEqual(sidecar.fixedFields[120] & 1, 1, "Missing device history is an explicit restart")
+        try sidecar.verifySignedVersion105Save(next, expectedCharacterName: fixtureName,
+            expectedPublicKey: key.publicKey.rawRepresentation)
+        try session.complete(candidate, generation: 7, committed: true)
+        try receive(metadata(save(3)), session)
+        let second = try XCTUnwrap(session.prepare(save(3), generation: 7, table: table(), timestamp: 103))
+        XCTAssertEqual(try CharacterSidecar.decode(second.sidecarBytes).historyCounter, 2)
+        XCTAssertEqual(baseline.bytes, save(1), "The authoritative baseline is never rewritten or re-registered")
+    }
+
+    func testDedicatedServerHistoryRequiresExactAuthoritativeManifestAndLadder() throws {
+        let ladder = UUID(), baseline = try verified(save(1), version: 19), key = P256.Signing.PrivateKey()
+        let cases = [
+            ServerSaveManifest(ladderID: UUID(), serverAuthoritative: true, files: [baseline.metadata]),
+            ServerSaveManifest(ladderID: ladder, serverAuthoritative: false, files: [baseline.metadata]),
+            ServerSaveManifest(ladderID: ladder, serverAuthoritative: true, files: []),
+            ServerSaveManifest(ladderID: ladder, serverAuthoritative: true, files: [try verified(save(1), version: 18).metadata]),
+            ServerSaveManifest(ladderID: ladder, serverAuthoritative: true, files: [try verified(save(2), version: 19).metadata])
+        ]
+        for manifest in cases {
+            XCTAssertThrowsError(try CharacterSaveCommitSession.serverOwnedSnapshot(generation: 7,
+                characterName: fixtureName, initialSave: baseline, manifest: manifest, ladderID: ladder,
+                environment: EnvironmentMetadata(), clientPlugins: [], signingKey: key))
+        }
+        XCTAssertThrowsError(try CharacterSaveCommitSession.serverOwnedSnapshot(generation: 7,
+            characterName: "Other", initialSave: baseline,
+            manifest: ServerSaveManifest(ladderID: ladder, serverAuthoritative: true, files: [baseline.metadata]),
+            ladderID: ladder, environment: EnvironmentMetadata(), clientPlugins: [], signingKey: key))
+    }
+
     func testMetadataQueueHasBoundAndRejectsFurtherUseAfterOverflow() throws {
         let session = try session()
         for i in 0..<CharacterSaveCommitSession.maximumPendingMetadata { try receive(metadata(save(UInt8(i))), session) }

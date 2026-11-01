@@ -56,9 +56,13 @@ modified. Changing only the Swift framing or only the final receiver would
 leave this earlier native validation incompatible.
 
 A bounded real-peer native Mac run passed the former length assertion and
-consumed medium and small state among333 logical packets. The engine then
-requested a disconnect; its cause and remote-world readiness still need
-verification. Big state has reference checks but no live observation yet.
+consumed medium and small state among333 logical packets. The premature
+disconnect was subsequently traced to the original backend session monitor;
+the scoped coordinator monitor now keeps the real bound connection active.
+A later20-second run processed original native HID movement and applied the
+new server position to the same native player. The matching shader cache was
+absent, so its magenta screenshots do not prove a rendered remote world.
+Big state has reference checks but no live observation yet.
 Do not expose this profile as a completed Play action in the app.
 
 ## Verification

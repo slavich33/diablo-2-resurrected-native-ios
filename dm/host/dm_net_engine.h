@@ -20,3 +20,7 @@ void svc_net_connect_guard(uint64_t *regs);
 void svc_net_start_guard(uint64_t *regs);
 void svc_net_bootstrap_guard(uint64_t *regs, uint64_t client);
 void svc_net_client_idle(uint64_t *regs, uint64_t original_body);
+// Per-frame session monitor. An isolated bound lane uses its coordinator-owned
+// connection state; unbound calls invoke the original one-argument monitor.
+// This is connection health, not a server game-admission acknowledgement.
+void svc_net_session_poll(uint64_t *regs, uint64_t original_target, uint64_t client);

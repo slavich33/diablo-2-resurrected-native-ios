@@ -30,16 +30,51 @@ public final class CharacterSaveCommitSession {
     private var committedSidecar: Data?
     private var trustedUnsignedDigest: Data?
     private var prepared: PreparedCharacterSave?
+    private let startsServerOwnedHistory: Bool
 
     public var pendingMetadataCount: Int { lock.lock(); defer { lock.unlock() }; return pending.count }
 
     /// With no predecessor, only a separately registered, pristine initial
     /// creation header is supported. A progressed download without its trusted
     /// sidecar must not silently acquire a new history.
-    public init(generation: UInt64, characterName: String, initialSave: VerifiedServerSave,
+    public convenience init(generation: UInt64, characterName: String, initialSave: VerifiedServerSave,
                 previousSidecar: Data? = nil, trustedUnsignedSidecarSHA256: Data? = nil,
                 environment: EnvironmentMetadata, clientPlugins: [CharacterSidecar.Plugin],
                 signingKey: P256.Signing.PrivateKey) throws {
+        try self.init(generation: generation, characterName: characterName, initialSave: initialSave,
+            previousSidecar: previousSidecar, trustedUnsignedSidecarSHA256: trustedUnsignedSidecarSHA256,
+            environment: environment, clientPlugins: clientPlugins, signingKey: signingKey,
+            startsServerOwnedHistory: false)
+    }
+
+    /// Dedicated-server ladders synchronize D2S/D2I through the authenticated
+    /// API, without a client sidecar. Their downloaded progressed character is
+    /// a valid baseline for a new local cache history. This explicit path must
+    /// receive that same fresh manifest/download; it never uploads local saves
+    /// or claims continuity with another device's missing signing history.
+    public static func serverOwnedSnapshot(generation: UInt64, characterName: String,
+                initialSave: VerifiedServerSave, manifest: ServerSaveManifest, ladderID: UUID,
+                environment: EnvironmentMetadata, clientPlugins: [CharacterSidecar.Plugin],
+                signingKey: P256.Signing.PrivateKey) throws -> CharacterSaveCommitSession {
+        try manifest.validate()
+        guard manifest.serverAuthoritative, manifest.ladderID == ladderID,
+              let entry = manifest.files.first(where: { $0.fileName == initialSave.metadata.fileName }),
+              entry.version == initialSave.metadata.version,
+              entry.sha256.lowercased() == initialSave.metadata.sha256.lowercased(),
+              entry.byteCount == initialSave.metadata.byteCount,
+              entry.characterName == initialSave.metadata.characterName else {
+            throw SaveCommitSessionError.invalidSnapshot
+        }
+        return try self.init(generation: generation, characterName: characterName, initialSave: initialSave,
+            previousSidecar: nil, trustedUnsignedSidecarSHA256: nil,
+            environment: environment, clientPlugins: clientPlugins, signingKey: signingKey,
+            startsServerOwnedHistory: true)
+    }
+
+    private init(generation: UInt64, characterName: String, initialSave: VerifiedServerSave,
+                previousSidecar: Data?, trustedUnsignedSidecarSHA256: Data?,
+                environment: EnvironmentMetadata, clientPlugins: [CharacterSidecar.Plugin],
+                signingKey: P256.Signing.PrivateKey, startsServerOwnedHistory: Bool) throws {
         guard generation > 0 else { throw SaveCommitSessionError.generation }
         guard initialSave.metadata.fileName == characterName + ".d2s",
               initialSave.metadata.characterName == nil || initialSave.metadata.characterName == characterName,
@@ -61,12 +96,13 @@ public final class CharacterSaveCommitSession {
                     throw SaveCommitSessionError.missingTrustedPredecessor
                 }
             }
-        } else {
+        } else if !startsServerOwnedHistory {
             guard initialSave.metadata.version == 1 else { throw SaveCommitSessionError.missingTrustedPredecessor }
             _ = try NewCharacterHeader(characterName: characterName, bytes: bytes)
             guard trustedUnsignedSidecarSHA256 == nil else { throw SaveCommitSessionError.invalidSnapshot }
         }
         self.generation = generation; self.characterName = characterName; gameEdition = edition
+        self.startsServerOwnedHistory = startsServerOwnedHistory
         key = signingKey; self.environment = environment; self.clientPlugins = clientPlugins
         committedSaveDigest = digest; committedSidecar = previousSidecar
         trustedUnsignedDigest = trustedUnsignedSidecarSHA256
@@ -146,7 +182,7 @@ public final class CharacterSaveCommitSession {
             historyID = Data(random)
         }
         fields = try SidecarHistoryFields.initial(fields, timestamp: timestamp, identifier: historyID,
-            restart: false, discontinuity: metadata.flag70)
+            restart: startsServerOwnedHistory && committedSidecar == nil, discontinuity: metadata.flag70)
         let candidate = try CharacterSidecar(fixedFields: fields, environmentMetadata: environment,
                                             clientPlugins: clientPlugins, stats: stats)
         let signed: CharacterSidecar

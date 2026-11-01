@@ -22,6 +22,12 @@ extern uint64_t dm_net_test_start_gate(uint64_t, uint64_t, uint64_t, uint64_t,
 extern uint64_t dm_net_test_bootstrap_gate(uint64_t, uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
+static int isolated_namespace = 1, original_session_calls;
+int dm_online_save_isolated(void) { return isolated_namespace; }
+static uint32_t original_session_monitor(uint64_t context) {
+    assert(context == 0xabcdef); original_session_calls++; return 7;
+}
+
 // The connect fixture enters the real assembly gate. Other shims are called
 // directly; a separate game run checks the actual module/metadata dispatcher.
 static int start_gate;
@@ -155,6 +161,11 @@ int main(int argc, char **argv) {
     uint64_t generation = dm_net_remote_attach(0x1234);
     assert(generation && !dm_net_remote_attach(0x5678));
     assert(dm_net_remote_decode_generation() == 0);
+    regs[0] = 0xabcdef;
+    svc_net_session_poll(regs, (uintptr_t)original_session_monitor, 0x5678);
+    assert(regs[0] == 7 && original_session_calls == 1);
+    regs[0] = 0xabcdef; svc_net_session_poll(regs, 0, 0x1234);
+    assert(regs[0] == 0); // Bound but not ready; never forwards to the backend.
     assert(dm_net_remote_connect_requested(generation) == 0);
     assert(dm_net_remote_start_requested(generation) == 0);
     regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 1);
@@ -167,6 +178,11 @@ int main(int argc, char **argv) {
     assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
     assert(!dm_net_remote_activate(generation));
     assert(dm_net_remote_decode_generation() == generation);
+    regs[0] = 0xabcdef; svc_net_session_poll(regs, 0, 0x1234);
+    assert(regs[0] == 1);
+    isolated_namespace = 0; regs[0] = 0xabcdef;
+    svc_net_session_poll(regs, 0, 0x1234); assert(regs[0] == 0);
+    isolated_namespace = 1;
     // The original remote frontend waits for start to become connected before
     // it can progress. A later connect method is not required for this path.
     assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
@@ -202,6 +218,8 @@ int main(int argc, char **argv) {
     assert(!dm_net_remote_held_size(generation, 2, borrowed));
     for (int i = 17; i < 24; i++) assert(result[i] == 0xa5);
     assert(!dm_net_remote_close(generation));
+    regs[0] = 0xabcdef; svc_net_session_poll(regs, 0, 0x1234);
+    assert(regs[0] == 0 && original_session_calls == 1);
     assert(dm_net_remote_decode_generation() == generation); // borrowed packet still needs its negotiated format
     assert(dm_net_remote_held_size(generation, DM_NET_GAMEPLAY, borrowed) == 4);
     assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && failed);

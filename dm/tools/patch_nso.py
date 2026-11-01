@@ -196,6 +196,7 @@ if NET_ENGINE_BRIDGE:
         (0x83fe64, '081440b91f050071', 'c11200d4c0035fd6', 'net-engine-v3: hard close -> svc96; bound failure remains bound', '仅宿主'),
         (0x83fe9c, 'ff4301d1f65702a9', 'e11200d4c0035fd6', 'net-engine-v3: graceful close -> svc97; unbound original prologue', '仅宿主'),
         (0x841740, '081440b91f050071', '411300d4c0035fd6', 'net-engine-v3: can-connect query -> svc9a; unbound comparison preserved', '仅宿主'),
+        (0x2c2bac, 'fcdbfa97', '211400d4', 'net-session: isolated bound coordinator connection health; unbound original backend monitor', '仅宿主'),
     ])
 # 触屏版规则域默认同时带宿主私有门；规则闸门可显式关闭，保留同一出包入口和规则域。
 # The touchscreen rule domain by default also carries the host-private gates; the rule gate check can turn them off explicitly, keeping the same packaging entry point and rule domain.

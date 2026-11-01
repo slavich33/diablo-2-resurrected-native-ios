@@ -305,6 +305,13 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
         else svc_net_client_close(regs, body, num == SVC_HOST_NET_GRACEFUL_CLOSE);
         return 1;
     }
+    case SVC_HOST_NET_SESSION_POLL: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name, "main") || orig_addr != 0x2c2bac)
+            die("Unsupported native session-monitor call");
+        svc_net_session_poll(regs, (uintptr_t)m->base + 0x179b9c, (uintptr_t)m->base + 0x2d9f438);
+        return 1;
+    }
     case SVC_HOST_NET_STATE_LENGTH: {
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);
         if (!m || strcmp(m->name, "main") || orig_addr != 0x2e4ebc)
