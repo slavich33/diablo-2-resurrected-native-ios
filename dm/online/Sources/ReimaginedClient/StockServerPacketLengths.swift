@@ -2,7 +2,7 @@ import Foundation
 
 /// Server-to-client game-packet metadata for the supported 3.3.94012 engine.
 /// These are packet lengths after transport decoding, not TCP record lengths.
-/// Nine variable formats are checked against native readers and bounded
+/// Twelve variable formats are checked against native readers/producers and bounded
 /// original-engine captures. Other variables and the system channel are separate.
 public enum StockServerPacketLengths {
     public enum Descriptor: Equatable {
@@ -26,7 +26,7 @@ public enum StockServerPacketLengths {
         11, 8, 9, 24, 3, 12, -1, 8, -1, 8, -1, 7, -1, 12, -1, // A0
     ]
 
-    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x73, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
+    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x71, 0x72, 0x73, 0x78, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
 
     public static func descriptor(for opcode: UInt8) -> Descriptor {
         guard Int(opcode) < sizes.count else { return .unsupported }
@@ -55,10 +55,23 @@ public enum StockServerPacketLengths {
         case 0x67:
             guard prefix.count >= 21 else { return .needMore }
             return .length(22 + 4 * byte(20))
+        case 0x71, 0x72:
+            // Both original producers cap their path batch at15 records. The
+            // native receivers copy four bytes per record into a fixed buffer.
+            let headerBytes = opcode == 0x71 ? 23 : 22
+            let countOffset = headerBytes - 2
+            guard prefix.count > countOffset else { return .needMore }
+            let count = byte(countOffset)
+            return count <= 15 ? .length(headerBytes + 4 * count) : .invalid
         case 0x73:
             // Native reader: 21-byte header, count at20, 67-byte records.
             guard prefix.count >= 21 else { return .needMore }
             return .length(21 + 67 * byte(20))
+        case 0x78:
+            // Native producer and receiver use a seven-byte header followed by
+            // byte6 payload bytes. The count excludes the header (max262).
+            guard prefix.count >= 7 else { return .needMore }
+            return .length(7 + byte(6))
         case 0x94:
             guard prefix.count >= 2 else { return .needMore }
             return .length(6 + 3 * byte(1))

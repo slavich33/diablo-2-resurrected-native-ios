@@ -6,7 +6,10 @@ final class VariableServerPacketLengthsTests: XCTestCase {
         let definitions: [(UInt8, Int, [Int: UInt8])] = [
             (0x5b, 97, [1: 97, 2: 0]), (0x5b, 300, [1: 44, 2: 1]),
             (0x67, 22, [20: 0]), (0x67, 26, [20: 1]), (0x67, 1042, [20: 255]),
+            (0x71, 23, [21: 0]), (0x71, 83, [21: 15]),
+            (0x72, 22, [20: 0]), (0x72, 82, [20: 15]),
             (0x73, 21, [20: 0]), (0x73, 88, [20: 1]),
+            (0x78, 7, [6: 0]), (0x78, 262, [6: 255]),
             (0x94, 6, [1: 0]), (0x94, 30, [1: 8]), (0x94, 771, [1: 255]),
             (0x9c, 20, [2: 20]), (0x9c, 252, [2: 252]),
             (0x9d, 33, [2: 33]), (0xa8, 12, [2: 12]),
@@ -105,6 +108,62 @@ final class VariableServerPacketLengthsTests: XCTestCase {
         try truncated.append(bytes.dropLast()); truncated.endOfInput()
         XCTAssertThrowsError(try truncated.nextPacket()) {
             XCTAssertEqual($0 as? GamePacketStreamError, .truncatedPacket)
+        }
+    }
+
+    func testPayloadByteCountExcludesHeaderAndRetainsEmbeddedControlBytes() throws {
+        // This payload deliberately resembles a loader carrier. Only the outer
+        // packet's byte count determines its boundary.
+        let payload = try ControlMessage(kind: 8, payload: Data([0x78, 0xd0, 0])).gameCarrier()
+        var packet = Data([0x78, 1, 2, 3, 4, 5, UInt8(payload.count)])
+        packet.append(payload)
+        for count in 0..<7 {
+            guard case .needMore = StockServerPacketLengths.resolve(packet.prefix(count)) else {
+                return XCTFail("Read payload count before the complete header")
+            }
+        }
+        let slice = (Data([99]) + packet).dropFirst()
+        guard case .length(let size) = StockServerPacketLengths.resolve(slice), size == packet.count else {
+            return XCTFail("Payload count was treated as a total length")
+        }
+        let control = try ControlMessage(kind: 8, payload: Data()).gameCarrier()
+        let stream = GamePacketStream(resolvePacketLength: ReimaginedServerPacketLengths.resolve)
+        try stream.append(packet.dropLast())
+        XCTAssertNil(try stream.nextPacket())
+        try stream.append(packet.suffix(1) + control)
+        guard case .gameplay(let actual) = try stream.nextPacket(),
+              case .control(let following) = try stream.nextPacket() else {
+            return XCTFail("Lost the boundary after a counted payload")
+        }
+        XCTAssertEqual(actual, packet); XCTAssertEqual(following.kind, 8)
+        let truncated = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+        try truncated.append(packet.dropLast()); truncated.endOfInput()
+        XCTAssertThrowsError(try truncated.nextPacket()) {
+            XCTAssertEqual($0 as? GamePacketStreamError, .truncatedPacket)
+        }
+    }
+
+    func testPathBatchCountCannotOverflowNativeReceiverBuffer() throws {
+        let control = try ControlMessage(kind: 8, payload: Data()).gameCarrier()
+        let definitions: [(UInt8, Int)] = [(0x71, 23), (0x72, 22)]
+        for (opcode, header) in definitions {
+            for count in [UInt8(16), 17, 255] {
+                var packet = Data(repeating: 0, count: header)
+                packet[0] = opcode; packet[header - 2] = count
+                let stream = GamePacketStream(resolvePacketLength: ReimaginedServerPacketLengths.resolve)
+                try stream.append(packet + control)
+                XCTAssertThrowsError(try stream.nextPacket()) {
+                    XCTAssertEqual($0 as? GamePacketStreamError, .invalidLength)
+                }
+                XCTAssertThrowsError(try stream.nextPacket())
+            }
+            for count in 0..<(header - 1) {
+                var partial = Data(repeating: 0, count: count)
+                if !partial.isEmpty { partial[0] = opcode }
+                guard case .needMore = StockServerPacketLengths.resolve(partial) else {
+                    return XCTFail("Read path count before its header byte")
+                }
+            }
         }
     }
 }
