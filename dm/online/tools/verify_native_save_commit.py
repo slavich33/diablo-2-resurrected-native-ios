@@ -34,11 +34,12 @@ def main():
     subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-O', '-sdk', sdk, '-module-name', 'NativeSaveCommitCheck',
                     '-import-objc-header', str(root / 'online/tools/SaveCommitIntegration/driver.h'), *sources,
                     str(root / 'ios/Sources/dm_online_tables.swift'), str(root / 'online/tools/SaveCommitIntegration/main.swift'),
-                    *objects, '-framework', 'Security', '-framework', 'Network', '-o', str(executable)], env=env, check=True, timeout=60)
+                    *objects, '-framework', 'Security', '-framework', 'Network', '-o', str(executable)], env=env, check=True, timeout=180)
     subprocess.run([str(executable), str(scratch)], env=env, check=True, timeout=45)
     subprocess.run([str(executable), str(scratch), '--readback-failure'], env=env, check=True, timeout=45)
     subprocess.run([str(executable), str(scratch), '--late-namespace'], env=env, check=True, timeout=45)
     subprocess.run([str(executable), str(scratch), '--detach'], env=env, check=True, timeout=45)
+    subprocess.run([str(executable), str(scratch), '--server-owned'], env=env, check=True, timeout=45)
 
 
 if __name__ == '__main__':

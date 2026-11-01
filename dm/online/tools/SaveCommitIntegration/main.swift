@@ -27,20 +27,21 @@ private func metadata(_ data: Data) throws -> CharacterSaveMetadata {
 }
 
 private func run() throws {
-    guard CommandLine.arguments.count == 2 || (CommandLine.arguments.count == 3 && ["--readback-failure", "--late-namespace", "--detach"].contains(CommandLine.arguments[2])) else { throw CheckError.arguments }
+    guard CommandLine.arguments.count == 2 || (CommandLine.arguments.count == 3 && ["--readback-failure", "--late-namespace", "--detach", "--server-owned"].contains(CommandLine.arguments[2])) else { throw CheckError.arguments }
     let corruptReadback = CommandLine.arguments.last == "--readback-failure"
     let lateNamespace = CommandLine.arguments.last == "--late-namespace"
     let healthyDetach = CommandLine.arguments.last == "--detach"
+    let serverOwned = CommandLine.arguments.last == "--server-owned"
     let manager = FileManager.default
     let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).appendingPathComponent("save-test-" + UUID().uuidString)
     try manager.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     defer { try? manager.removeItem(at: root) }
     let offline = root.appendingPathComponent("offline-sentinel"), untouched = Data("independent offline sentinel".utf8)
     try untouched.write(to: offline)
-    let initial = save(), key = P256.Signing.PrivateKey()
+    let initial = save(serverOwned ? 0 : nil), key = P256.Signing.PrivateKey()
     let entry = ServerSaveMetadata(fileName: fixtureName + ".d2s", characterName: fixtureName,
         sha256: SHA256.hash(data: initial).map { String(format: "%02x", $0) }.joined(),
-        version: 1, byteCount: Int64(initial.count), corrupt: false, lastSavedAtUtc: nil)
+        version: serverOwned ? 19 : 1, byteCount: Int64(initial.count), corrupt: false, lastSavedAtUtc: nil)
     let verified = try VerifiedServerSave(metadata: entry, bytes: initial)
     let scope = try LadderSaveScope(ladderID: UUID(), accountID: "own-synthetic-account")
     let manifest = ServerSaveManifest(ladderID: scope.ladderID, serverAuthoritative: true, files: [entry])
@@ -110,8 +111,16 @@ private func run() throws {
     let boundTableGeneration = boundInfo.generation
     try require(tableProfile.generations[3] == boundTableGeneration, "profile-binds-actual-native-generation")
     var acquired = 0, released = 0, releaseFailure = false
-    let session = try CharacterSaveCommitSession(generation: 7, characterName: fixtureName, initialSave: verified,
-        environment: EnvironmentMetadata(rootTexts: [Data("own-fixture".utf8), Data()]), clientPlugins: [], signingKey: key)
+    let environment = try EnvironmentMetadata(rootTexts: [Data("own-fixture".utf8), Data()])
+    let session: CharacterSaveCommitSession
+    if serverOwned {
+        session = try CharacterSaveCommitSession.serverOwnedSnapshot(generation: 7, characterName: fixtureName,
+            initialSave: verified, manifest: manifest, ladderID: scope.ladderID,
+            environment: environment, clientPlugins: [], signingKey: key)
+    } else {
+        session = try CharacterSaveCommitSession(generation: 7, characterName: fixtureName, initialSave: verified,
+            environment: environment, clientPlugins: [], signingKey: key)
+    }
     let coordinator = try NativeSaveCommitCoordinator(namespace: namespace, session: session) { metadata in
         let native = try NativeItemStatCostCapture.acquireLease(for: metadata, expectedGeneration: boundTableGeneration); acquired += 1
         return SaveTableLease(snapshot: native.snapshot) {
