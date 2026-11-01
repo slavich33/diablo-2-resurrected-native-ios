@@ -117,4 +117,65 @@ final class GameLobbyTests: XCTestCase {
         list = try ReimaginedJSON.decoder().decode(LobbyGameList.self, from: bytes(["games": [game], "totalPlayers": 1]))
         XCTAssertThrowsError(try list.validate())
     }
+
+    func testCurrentRoomRestrictionFieldsAreRetained() throws {
+        var room = listing
+        room["level_difference_enabled"] = true
+        room["level_difference"] = 10
+        room["rejects_cheated_characters"] = true
+        let list = try ReimaginedJSON.decoder().decode(LobbyGameList.self, from: bytes(["games": [room], "totalPlayers": 1]))
+        try list.validate()
+        XCTAssertEqual(list.games[0].levelDifferenceEnabled, true)
+        XCTAssertEqual(list.games[0].levelDifference, 10)
+        XCTAssertEqual(list.games[0].rejectsCheatedCharacters, true)
+
+        var endpoint = resolved
+        endpoint["level_difference_enabled"] = true
+        endpoint["level_difference"] = 10
+        endpoint["host_level"] = 50
+        let game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(endpoint))
+        try game.validate()
+        XCTAssertEqual(game.hostLevel, 50)
+        for level in [40, 50, 60] as [UInt16] { XCTAssertEqual(game.levelCompatibility(characterLevel: level), .allowed) }
+        for level in [1, 39, 61, 1_023] as [UInt16] { XCTAssertEqual(game.levelCompatibility(characterLevel: level), .outsideRange) }
+    }
+
+    func testMissingAndDisabledRestrictionsStayDistinct() throws {
+        let oldResponse = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(resolved))
+        XCTAssertEqual(oldResponse.levelCompatibility(characterLevel: 1), .unverified)
+        let incomplete: [[String: Any]] = [
+            ["level_difference_enabled": true],
+            ["level_difference_enabled": true, "host_level": 50],
+            ["level_difference_enabled": true, "host_level": 0, "level_difference": 10]
+        ]
+        for fields in incomplete {
+            let game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(resolved.merging(fields) { _, new in new }))
+            XCTAssertEqual(game.levelCompatibility(characterLevel: 1), .unverified)
+        }
+        var endpoint = resolved
+        endpoint["level_difference_enabled"] = false
+        let game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(endpoint))
+        XCTAssertEqual(game.levelCompatibility(characterLevel: 1), .allowed)
+        XCTAssertEqual(game.levelCompatibility(characterLevel: 0), .unverified)
+    }
+
+    func testLevelRestrictionBoundsDoNotWrapOrCoerceMalformedFields() throws {
+        var endpoint = resolved
+        endpoint["level_difference_enabled"] = true
+        endpoint["level_difference"] = 65_534
+        endpoint["host_level"] = 1
+        var game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(endpoint))
+        XCTAssertEqual(game.levelCompatibility(characterLevel: .max), .allowed)
+        endpoint["level_difference"] = 65_533
+        game = try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(endpoint))
+        XCTAssertEqual(game.levelCompatibility(characterLevel: .max), .outsideRange)
+        for key in ["host_level", "level_difference"] {
+            for value in [-1, 65_536, 1.5, "1"] as [Any] {
+                var malformed = endpoint; malformed[key] = value
+                XCTAssertThrowsError(try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(malformed)))
+            }
+        }
+        var malformed = endpoint; malformed["level_difference_enabled"] = "false"
+        XCTAssertThrowsError(try ReimaginedJSON.decoder().decode(ResolvedLobbyGame.self, from: bytes(malformed)))
+    }
 }

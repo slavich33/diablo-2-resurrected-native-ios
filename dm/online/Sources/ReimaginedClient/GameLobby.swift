@@ -4,6 +4,11 @@ public enum GameLobbyError: Error, Equatable {
     case wrongLadder, expiredSession, invalidGameID, invalidResponse
 }
 
+/// Only the advertised level restriction, never game or account admission.
+public enum LobbyLevelCompatibility: Equatable {
+    case allowed, outsideRange, unverified
+}
+
 /// Read-only player lobby metadata. These summaries describe the server's
 /// environment; they are never used as evidence of the native client's own
 /// compatibility or copied into an admission manifest.
@@ -85,6 +90,9 @@ public struct LobbyGame: Decodable, Equatable {
     public let modVersion: String
     public let type: String
     public let hardcore: Bool
+    public let levelDifferenceEnabled: Bool?
+    public let levelDifference: UInt16?
+    public let rejectsCheatedCharacters: Bool?
     public let passwordRequired: Bool
     public let maxPlayers: UInt16
     public let players: [Player]
@@ -96,6 +104,8 @@ public struct LobbyGame: Decodable, Equatable {
         case gameID = "game_id", gameMode = "game_mode", gameVersion = "game_version", loaderVersion = "loader_version"
         case modIdentity = "mod_identity", modVersion = "mod_version", passwordRequired = "password_required"
         case maxPlayers = "max_players", regionIDs = "region_ids", environment = "environment_fingerprint"
+        case levelDifferenceEnabled = "level_difference_enabled", levelDifference = "level_difference"
+        case rejectsCheatedCharacters = "rejects_cheated_characters"
     }
 
     public static func isValidID(_ value: String) -> Bool {
@@ -122,17 +132,30 @@ public struct ResolvedLobbyGame: Decodable, Equatable {
     public let difficulty: String
     public let gameMode: String
     public let hardcore: Bool
+    public let hostLevel: UInt16?
+    public let levelDifferenceEnabled: Bool?
+    public let levelDifference: UInt16?
     public let type: String
     public let modIdentity: String
     public let environment: LobbyEnvironmentSummary
     enum CodingKeys: String, CodingKey {
         case address, port, difficulty, hardcore, type
         case gameNumber = "game_number", gameMode = "game_mode", modIdentity = "mod_identity", environment = "environment_fingerprint"
+        case hostLevel = "host_level", levelDifferenceEnabled = "level_difference_enabled", levelDifference = "level_difference"
     }
 
     /// The current original engine startup field has 24 bytes including NUL.
     /// Do not truncate a longer DNS name to make it fit.
     public var fitsOriginalEngineAddress: Bool { address.utf8.count < 24 }
+
+    /// Supply the actual selected character's level. Missing restriction data
+    /// stays unknown; it must not silently become an unrestricted room.
+    public func levelCompatibility(characterLevel: UInt16) -> LobbyLevelCompatibility {
+        guard characterLevel > 0, let enabled = levelDifferenceEnabled else { return .unverified }
+        guard enabled else { return .allowed }
+        guard let maximum = levelDifference, let host = hostLevel, host > 0 else { return .unverified }
+        return abs(Int(characterLevel) - Int(host)) <= Int(maximum) ? .allowed : .outsideRange
+    }
 
     public func validate() throws {
         guard !address.isEmpty, address.utf8.count <= 253,

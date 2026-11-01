@@ -28,6 +28,15 @@ It does not encode D2EM, evaluate the full fingerprint contract or implement
 the required plugins. In particular, unmodeled `shared_patches` and listing
 fields are not silently turned into native capability claims.
 
+Listings also retain optional `level_difference_enabled`, `level_difference`
+and `rejects_cheated_characters`; resolution retains the two level fields and
+`host_level`. Missing fields remain unknown. `levelCompatibility` checks only
+the resolved room's advertised level range against the actual selected
+character's level. An allowed level does not establish matching game edition,
+hardcore mode, data/plugins, account authorization or game admission. An
+incomplete enabled restriction returns `unverified`, never an unrestricted
+result. Callers must check the freshly resolved room before starting the engine.
+
 ## Selected-room startup research
 
 The cached, signed revision-6 lobby bridge (SHA-256
