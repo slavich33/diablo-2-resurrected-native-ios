@@ -31,3 +31,11 @@ int dm_net_itemstatcost_copy(unsigned edition, uint64_t generation,
 // Generation is mandatory even for a query; missing/invalid names fail closed.
 int dm_net_itemstatcost_name(unsigned edition, uint64_t generation, unsigned stat_id,
                             char *out, size_t capacity, size_t *required);
+
+// Pin the published captured snapshot across a short local save commit. Copy
+// rows/names BEFORE pinning. READY holds the capture-publication mutex until
+// unpin on the SAME thread; failed pin holds nothing. No nested pin or copy/name
+// query on that thread while pinned. This does not suspend the engine or grant
+// admission: its environment/lifecycle must independently remain bound.
+int dm_net_itemstatcost_pin(unsigned edition, uint64_t generation);
+int dm_net_itemstatcost_unpin(void);

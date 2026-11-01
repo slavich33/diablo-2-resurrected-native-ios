@@ -1,6 +1,6 @@
 # Original-engine D2S completion boundary
 
-`dm/host/hle_fs.c` exposes the optional `dm_save_completion.h` native receiver. Its weak defaults are disabled/no-op. A coordinator overrides both functions and enables the receiver only while its explicit isolated server-save scope is bound. No production receiver/coordinator is connected yet.
+`dm/host/hle_fs.c` exposes the optional `dm_save_completion.h` native receiver. Its weak defaults are disabled/no-op. [NativeSaveCommitCoordinator](NATIVE_SAVE_RECEIVER.md) supplies linked Swift overrides whose registry starts empty. The app's actual online startup does not yet bind it or start an admitted engine session.
 
 The close event is emitted after the actual successful POSIX close of a D2S handle opened for writing. A borrowed canonical host path is obtained before close and is valid only during the callback. Read-only D2S closes do not emit events. Rename events occur only after a successful rename to D2S and guest-name metadata update.
 
@@ -11,6 +11,8 @@ The callback may run on an engine IO thread. It must copy the borrowed path, fil
 ## Final commit gate
 
 `dm_online_save_prepare(workdir,commitdir)` runs after all five legacy pre-commit hooks and before cloning the work tree. Its weak default returns0. A linked coordinator may prepare a matching signed sidecar in the same work directory while holding its authenticated namespace/table leases. It must not wait on network or call game filesystem APIs: path/mount locks are held.
+
+HLE write, resize and close use that same path lock. When a receiver is bound, Commit defers before entering prepare if any save writer remains open. A completed close is thus not used to justify publishing another still-open file.
 
 A nonzero return defers the commit, preserves both the complete pending work tree and previously committed tree, and sends the existing save-error notification. Missing metadata must not poison a valid work tree and discard progress. An already poisoned writer transaction follows its existing rollback path without entering this gate. If the gate itself poisons the transaction while returning0, that rollback still runs.
 
@@ -30,6 +32,6 @@ make -C dm/host/tests save-completion
 
 The focused test uses the real host filesystem, checks that the descriptor is already closed and bytes readable when the callback runs, verifies writer/rename selection, rejects failed events and confirms rollback keeps the previous committed bytes. Existing filesystem and filename regressions remain separate.
 
-An event alone does not prove checksum validity, commit success, accepted server progress or ladder admission. The [commit-session API](CHARACTER_SAVE_COMMIT_SESSION.md) handles metadata matching and signed candidates, but its production receiver, actual namespace/table leases and network/save integration remain disconnected.
+An event alone does not prove checksum validity, commit success, accepted server progress or ladder admission. The [commit-session API](CHARACTER_SAVE_COMMIT_SESSION.md) and receiver now have a coupled native local verification; actual app/namespace startup, admission and network/server-save integration remain disconnected.
 
 An isolated original ARM64 Mac run exercised the hook through the game's own Save and Exit path. It observed a1039-byte version105 file with a valid rolling checksum; an independent read of the committed disposable save copy matched the observed digest, and the game returned to its front end. The original source fixture stayed unchanged. This was offline engine-boundary evidence, with no production receiver, server upload or iPhone update.

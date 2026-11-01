@@ -1,6 +1,9 @@
 #include "../dm.h"
 #include "../dm_net_tables.h"
 #include <assert.h>
+#include <pthread.h>
+#include <errno.h>
+#include <time.h>
 
 module_t g_mod[MAX_MOD];
 int g_nmod = 1;
@@ -8,6 +11,15 @@ static int gate_present;
 static void (*observer)(const uint64_t *);
 int gate_obs_present(int id) { assert(id == OBS_NET_ITEMSTATCOST); return gate_present; }
 void gate_obs_set(int id, void (*fn)(const uint64_t *)) { assert(id == OBS_NET_ITEMSTATCOST); observer = fn; }
+typedef struct { pthread_mutex_t lock; pthread_cond_t condition; int started, done; const uint64_t *regs; } reload_job;
+static void *reload_worker(void *context) {
+    reload_job *job = context;
+    assert(dm_net_itemstatcost_unpin() == DM_NET_TABLE_INVALID); // A different thread cannot release the pin.
+    pthread_mutex_lock(&job->lock); job->started = 1; pthread_cond_signal(&job->condition); pthread_mutex_unlock(&job->lock);
+    observer(job->regs);
+    pthread_mutex_lock(&job->lock); job->done = 1; pthread_cond_signal(&job->condition); pthread_mutex_unlock(&job->lock);
+    return NULL;
+}
 
 int main(void) {
     dm_net_itemstatcost_info info;
@@ -65,6 +77,29 @@ int main(void) {
         assert(dm_net_itemstatcost_name(e, generation, 0, name, sizeof name, &required) == DM_NET_TABLE_STALE && !required);
         assert(dm_net_itemstatcost_copy(e, info.generation, out, sizeof out, &info) == DM_NET_TABLE_READY);
         assert(out[0] == 0x64);
+        uint64_t pinned_generation = info.generation;
+        assert(dm_net_itemstatcost_pin(e, 0) == DM_NET_TABLE_INVALID);
+        assert(dm_net_itemstatcost_pin(e, pinned_generation - 1) == DM_NET_TABLE_STALE);
+        assert(dm_net_itemstatcost_pin(e, pinned_generation) == DM_NET_TABLE_READY);
+        assert(dm_net_itemstatcost_pin(e, pinned_generation) == DM_NET_TABLE_INVALID);
+        assert(dm_net_itemstatcost_copy(e, 0, NULL, 0, &info) == DM_NET_TABLE_INVALID);
+        assert(dm_net_itemstatcost_name(e, pinned_generation, 0, name, sizeof name, &required) == DM_NET_TABLE_INVALID);
+        reload_job job = {.lock = PTHREAD_MUTEX_INITIALIZER, .condition = PTHREAD_COND_INITIALIZER, .regs = regs};
+        pthread_t worker; assert(!pthread_create(&worker, NULL, reload_worker, &job));
+        pthread_mutex_lock(&job.lock);
+        while (!job.started) pthread_cond_wait(&job.condition, &job.lock);
+        struct timespec deadline; assert(!clock_gettime(CLOCK_REALTIME, &deadline));
+        deadline.tv_nsec += 25000000; if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; }
+        int wait_result = 0;
+        while (!job.done && !wait_result) wait_result = pthread_cond_timedwait(&job.condition, &job.lock, &deadline);
+        assert(!job.done && wait_result == ETIMEDOUT);
+        pthread_mutex_unlock(&job.lock);
+        assert(dm_net_itemstatcost_unpin() == DM_NET_TABLE_READY);
+        assert(dm_net_itemstatcost_unpin() == DM_NET_TABLE_INVALID);
+        assert(!pthread_join(worker, NULL));
+        pthread_cond_destroy(&job.condition); pthread_mutex_destroy(&job.lock);
+        assert(dm_net_itemstatcost_copy(e, 0, NULL, 0, &info) == DM_NET_TABLE_READY && info.generation == pinned_generation + 1);
+        assert(dm_net_itemstatcost_pin(e, pinned_generation) == DM_NET_TABLE_STALE);
         // A failed reload invalidates the old successful data, including an
         // unreadable pointer, oversized/empty rows, and count > capacity.
         for (unsigned failure = 0; failure < 4; ++failure) {
@@ -95,5 +130,5 @@ int main(void) {
         memset(g_mod[0].base + 0x2d64a18 + 16 * e, 0, 8);
     }
     free(manager); free(g_mod[0].base);
-    puts("native table capture: edition isolation, immutable copy, reload generations and failed-read invalidation passed");
+    puts("native table capture: edition isolation, immutable copy, pinned publication across reload, same-thread release and failed-read invalidation passed");
 }

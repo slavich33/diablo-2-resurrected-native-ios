@@ -469,6 +469,15 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     if (i == g_nmnt || !g_mnt[i].commit[0]) { pthread_mutex_unlock(&g_lock); return RES_OK; }   // 非事务挂载：无可提交 | non-transactional mount: nothing to commit
     uint64_t tc0 = clock_gettime_nsec_np(CLOCK_MONOTONIC), tw0 = atomic_exchange(&g_txn_first_ns, 0);
     for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
+    if (dm_online_d2s_completion_enabled() && !atomic_load(&g_save_poison)) {
+        int writers = 0;
+        for (int k = 0; k < 65536; ++k) writers += g_fsave[k] && (g_fmode[k] & (MODE_WRITE | MODE_APPEND));
+        if (writers) {
+            pthread_mutex_unlock(&g_lock);
+            front_save_failed(EAGAIN);
+            return RES_FAIL;
+        }
+    }
     int online_prepared = 0;
     // An already damaged game transaction follows its existing rollback path.
     // Missing remote metadata is different: keep the complete work tree for a
@@ -647,6 +656,7 @@ HLE_FORCE("_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm", "fsp-srv → pread(2)", 
     return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE", "fsp-srv → pwrite(2)", Result, h_fs_WriteFile, uint64_t h, int64_t off, const void *buf, size_t sz, const void *opt) {
+    PATH_LOCK();
     if (!h) return RES_FAIL;
     (void)opt; size_t put = 0;
     if (g_fsave[(int)h & 0xffff]) {                                     // 存档写注入点（确定性回归用；只数存档挂载上的写） | Save write injection point (for deterministic regression; only writes on the save mount are counted)
@@ -674,6 +684,7 @@ HLE_FORCE("_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE", "fsp-srv → fstat(2)", 
     *out = (int)h < 4096 && g_hm[(int)h] ? g_hm[(int)h]->size : st.st_size; return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", "fsp-srv → ftruncate(2)", Result, h_fs_SetFileSize, uint64_t h, int64_t sz) {
+    PATH_LOCK();
     if (!h) return RES_FAIL;
     if (!ftruncate((int)h, sz)) return RES_OK;
     if (g_fsave[(int)h & 0xffff]) save_poison(errno);
@@ -681,6 +692,7 @@ HLE_FORCE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", "fsp-srv → ftruncate(2)
 }
 HLE_FORCE("_ZN2nn2fs9FlushFileENS0_10FileHandleE", "fsp-srv；宿主 write 已进页缓存，刷新为空操作", Result, h_fs_FlushFile, uint64_t h) { (void)h; return RES_OK; }
 HLE_FORCE("_ZN2nn2fs9CloseFileENS0_10FileHandleE", "fsp-srv → close(2)", void, h_fs_CloseFile, uint64_t h) {
+    PATH_LOCK();
     if (!h) return;
     int save = g_fsave[(int)h & 0xffff];
     g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;

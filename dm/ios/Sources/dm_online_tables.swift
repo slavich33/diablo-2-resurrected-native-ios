@@ -50,6 +50,17 @@ struct NativeItemStatCostCapture {
         try load(edition: metadata.gameEdition, usage: metadata.statUsage())
     }
 
+    /// Copy first, then pin that exact published capture across the native
+    /// filesystem prepare/finished pair. No copy/query while the pin is held.
+    static func acquireLease(for metadata: CharacterSaveMetadata, expectedGeneration: UInt64) throws -> SaveTableLease {
+        let capture = try load(for: metadata)
+        guard expectedGeneration != 0, capture.generation == expectedGeneration else { throw NativeSaveCommitError.generation }
+        let status = dm_net_itemstatcost_pin(UInt32(capture.snapshot.edition), capture.generation)
+        if status == DM_NET_TABLE_STALE { throw NativeSaveCommitError.generation }
+        guard status == DM_NET_TABLE_READY else { throw NativeItemStatCostError.nativeStatus(status) }
+        return SaveTableLease(snapshot: capture.snapshot) { _ = dm_net_itemstatcost_unpin() }
+    }
+
     /// Call again at transaction commit; a captured old edition cannot silently
     /// become the schema for a freshly loaded mod. Own copied bytes remain safe.
     func validateCurrent() throws {

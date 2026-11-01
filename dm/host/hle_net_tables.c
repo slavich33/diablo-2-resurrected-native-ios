@@ -16,6 +16,24 @@ typedef struct {
 } table_snapshot;
 static table_snapshot snapshots[3];
 static pthread_mutex_t snapshots_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local int snapshot_pinned;
+
+int dm_net_itemstatcost_pin(unsigned edition, uint64_t generation) {
+    if (edition < 1 || edition > 3 || !generation || snapshot_pinned) return DM_NET_TABLE_INVALID;
+    pthread_mutex_lock(&snapshots_lock);
+    const table_snapshot *s = &snapshots[edition - 1];
+    int status = generation == s->info.generation ? s->status : DM_NET_TABLE_STALE;
+    if (status == DM_NET_TABLE_READY) snapshot_pinned = 1;
+    else pthread_mutex_unlock(&snapshots_lock);
+    return status;
+}
+
+int dm_net_itemstatcost_unpin(void) {
+    if (!snapshot_pinned) return DM_NET_TABLE_INVALID;
+    snapshot_pinned = 0;
+    pthread_mutex_unlock(&snapshots_lock);
+    return DM_NET_TABLE_READY;
+}
 
 static void free_names(table_snapshot *s) {
     if (s->names) for (uint32_t i = 0; i < s->info.row_count; ++i) free(s->names[i]);
@@ -31,7 +49,7 @@ static int read_live(uint64_t address, void *out, size_t size) {
 int dm_net_itemstatcost_copy(unsigned edition, uint64_t generation,
                             void *rows, size_t capacity,
                             dm_net_itemstatcost_info *info) {
-    if (edition < 1 || edition > 3 || !info || (!rows && capacity)) return DM_NET_TABLE_INVALID;
+    if (edition < 1 || edition > 3 || !info || (!rows && capacity) || snapshot_pinned) return DM_NET_TABLE_INVALID;
     pthread_mutex_lock(&snapshots_lock);
     const table_snapshot *s = &snapshots[edition - 1];
     int status = s->status;
@@ -49,7 +67,7 @@ int dm_net_itemstatcost_copy(unsigned edition, uint64_t generation,
 
 int dm_net_itemstatcost_name(unsigned edition, uint64_t generation, unsigned stat_id,
                             char *out, size_t capacity, size_t *required) {
-    if (edition < 1 || edition > 3 || !generation || !required || (!out && capacity)) return DM_NET_TABLE_INVALID;
+    if (edition < 1 || edition > 3 || !generation || !required || (!out && capacity) || snapshot_pinned) return DM_NET_TABLE_INVALID;
     *required = 0;
     pthread_mutex_lock(&snapshots_lock);
     const table_snapshot *s = &snapshots[edition - 1];

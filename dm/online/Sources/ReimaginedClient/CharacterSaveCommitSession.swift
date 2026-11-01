@@ -18,6 +18,7 @@ public final class CharacterSaveCommitSession {
     public let characterName: String
     public let gameEdition: UInt8
     private let owner = UUID()
+    private let lock = NSRecursiveLock()
     private let key: P256.Signing.PrivateKey
     private let environment: EnvironmentMetadata
     private let clientPlugins: [CharacterSidecar.Plugin]
@@ -30,7 +31,7 @@ public final class CharacterSaveCommitSession {
     private var trustedUnsignedDigest: Data?
     private var prepared: PreparedCharacterSave?
 
-    public var pendingMetadataCount: Int { pending.count }
+    public var pendingMetadataCount: Int { lock.lock(); defer { lock.unlock() }; return pending.count }
 
     /// With no predecessor, only a separately registered, pristine initial
     /// creation header is supported. A progressed download without its trusted
@@ -72,6 +73,7 @@ public final class CharacterSaveCommitSession {
     }
 
     public func invalidate() {
+        lock.lock(); defer { lock.unlock() }
         active = false; assembly.reset(); pending.removeAll(); consumed.removeAll(); prepared = nil
     }
 
@@ -79,6 +81,7 @@ public final class CharacterSaveCommitSession {
     /// A malformed transfer invalidates this session, requiring an explicit new
     /// binding instead of resuming fragments in an ambiguous save transaction.
     public func receive(_ message: ControlMessage, generation: UInt64) throws {
+        lock.lock(); defer { lock.unlock() }
         try require(generation)
         do {
             if let metadata = try assembly.append(message) {
@@ -103,6 +106,15 @@ public final class CharacterSaveCommitSession {
     /// reports that the same D2S+sidecar directory transaction actually committed.
     public func prepare(_ save: Data, generation: UInt64,
                                  table: ItemStatCostSnapshot, timestamp: UInt64) throws -> PreparedCharacterSave? {
+        lock.lock(); defer { lock.unlock() }
+        guard let metadata = try matchingMetadata(for: save, generation: generation) else { return nil }
+        let stats = try table.descriptors(for: metadata)
+        if let prepared, prepared.saveBytes == save, prepared.metadata == metadata, prepared.stats == stats { return prepared }
+        return try prepareMatched(save, metadata: metadata, stats: stats, timestamp: timestamp)
+    }
+
+    public func matchingMetadata(for save: Data, generation: UInt64) throws -> CharacterSaveMetadata? {
+        lock.lock(); defer { lock.unlock() }
         try require(generation)
         guard save.count >= 403, save.count <= 8 * 1024 * 1024 else { throw CharacterSaveMetadataError.saveMismatch }
         let checksum = Self.word(save, 12), digest = Data(SHA256.hash(data: save))
@@ -112,8 +124,11 @@ public final class CharacterSaveCommitSession {
             throw candidates.isEmpty ? SaveCommitSessionError.waitingForMetadata : SaveCommitSessionError.digestMismatch
         }
         try metadata.verifyVersion105Save(save, expectedCharacterName: characterName)
-        let stats = try table.descriptors(for: metadata)
-        if let prepared, prepared.saveBytes == save, prepared.metadata == metadata, prepared.stats == stats { return prepared }
+        return metadata
+    }
+
+    private func prepareMatched(_ save: Data, metadata: CharacterSaveMetadata,
+                                stats: [CharacterSidecar.Stat], timestamp: UInt64) throws -> PreparedCharacterSave {
         var fields = Data(count: 296)
         func put(_ offset: Int, _ value: UInt64, _ count: Int) {
             for i in 0..<count { fields[offset + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) }
@@ -148,6 +163,7 @@ public final class CharacterSaveCommitSession {
     }
 
     public func complete(_ candidate: PreparedCharacterSave, generation: UInt64, committed: Bool) throws {
+        lock.lock(); defer { lock.unlock() }
         try require(generation)
         guard candidate.owner == owner, prepared?.token == candidate.token else { throw SaveCommitSessionError.stalePreparation }
         guard committed else { return } // Retry reuses the same signed candidate.
@@ -157,6 +173,18 @@ public final class CharacterSaveCommitSession {
         consumed.append(Data(SHA256.hash(data: candidate.metadata.encoded())))
         if consumed.count > Self.maximumPendingMetadata { consumed.removeFirst() }
         prepared = nil
+    }
+
+    // The filesystem bridge holds this recursive lease through the actual
+    // directory swap. Public receive/invalidate cannot race that transaction.
+    func beginFilesystemTransaction() { lock.lock() }
+    func endFilesystemTransaction() { lock.unlock() }
+    func verifyCommittedSnapshot(save: Data, sidecar: Data?) throws {
+        lock.lock(); defer { lock.unlock() }
+        try require(generation)
+        guard Data(SHA256.hash(data: save)) == committedSaveDigest, sidecar == committedSidecar else {
+            throw SaveCommitSessionError.invalidSnapshot
+        }
     }
 
     private func require(_ value: UInt64) throws {
