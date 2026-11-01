@@ -4,8 +4,10 @@ import XCTest
 final class VariableServerPacketLengthsTests: XCTestCase {
     private func samples() -> [Data] {
         let definitions: [(UInt8, Int, [Int: UInt8])] = [
+            (0x3e, 2, [1: 2]), (0x3e, 34, [1: 34]),
             (0x5b, 97, [1: 97, 2: 0]), (0x5b, 300, [1: 44, 2: 1]),
             (0x67, 22, [20: 0]), (0x67, 26, [20: 1]), (0x67, 1042, [20: 255]),
+            (0x70, 6, [1: 0]), (0x70, 510, [1: 63]),
             (0x71, 23, [21: 0]), (0x71, 83, [21: 15]),
             (0x72, 22, [20: 0]), (0x72, 82, [20: 15]),
             (0x73, 21, [20: 0]), (0x73, 88, [20: 1]),
@@ -54,6 +56,8 @@ final class VariableServerPacketLengthsTests: XCTestCase {
 
     func testMalformedDeclaredLengthsAreTerminalBeforeFollowingControl() throws {
         let malformed: [Data] = [
+            Data([0x3e, 0]), Data([0x3e, 1]), Data([0x3e, 35]),
+            Data([0x70, 64]), Data([0x70, 255]),
             Data([0x5b, 95, 0]), Data([0x9c, 0, 7]), Data([0x9c, 0, 253]),
             Data([0x9d, 0, 12]), Data([0xa8, 0, 8]),
             Data([0xaa, 0, 0, 0, 0, 0, 8]),
@@ -164,6 +168,27 @@ final class VariableServerPacketLengthsTests: XCTestCase {
                     return XCTFail("Read path count before its header byte")
                 }
             }
+        }
+    }
+
+    func testFullRecordBatchCanBeFollowedByEmptyFinalBatch() throws {
+        var full = Data(repeating: 0xd0, count: 510)
+        full[0] = 0x70; full[1] = 63; full[2] = 1; full[3] = 0
+        let final = Data([0x70, 0, 2, 0, 2, 0])
+        let control = try ControlMessage(kind: 8, payload: Data()).gameCarrier()
+        let stream = GamePacketStream(resolvePacketLength: ReimaginedServerPacketLengths.resolve)
+        try stream.append(full + final + control)
+        guard case .gameplay(let first) = try stream.nextPacket(),
+              case .gameplay(let second) = try stream.nextPacket(),
+              case .control(let third) = try stream.nextPacket() else {
+            return XCTFail("Empty final batch was lost")
+        }
+        XCTAssertEqual(first, full); XCTAssertEqual(second, final); XCTAssertEqual(third.kind, 8)
+        XCTAssertNil(try stream.nextPacket())
+        let truncated = GamePacketStream(resolvePacketLength: StockServerPacketLengths.resolve)
+        try truncated.append(final.dropLast()); truncated.endOfInput()
+        XCTAssertThrowsError(try truncated.nextPacket()) {
+            XCTAssertEqual($0 as? GamePacketStreamError, .truncatedPacket)
         }
     }
 }

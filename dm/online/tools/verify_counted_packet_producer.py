@@ -23,7 +23,7 @@ from unicorn import arm64_const
 from check_engine_input import check
 
 
-def capture(main, scratch):
+def capture(main, scratch, extended=False):
     if scratch.exists():
         raise ValueError("Refuse to replace an existing capture directory")
     proof = check(main)
@@ -65,6 +65,10 @@ def capture(main, scratch):
             if a not in (client, subject) or b != 0:
                 raise ValueError("Unexpected producer dependency")
             return_to_caller(unit)
+        elif pc == 0x694970 and extended:
+            if a != world or not 0 <= b <= 255:
+                raise ValueError("Unexpected batch-record dependency")
+            return_to_caller(b ^ 0x1234)
         elif pc in (0x1b76040, 0x1b76050):
             if count > 4096:
                 raise ValueError("Unbounded synthetic memory dependency")
@@ -76,11 +80,12 @@ def capture(main, scratch):
             if a != 0x2d7f3d8:
                 raise ValueError("Unexpected send dependency")
             begin, end = struct.unpack("<QQ", cpu.mem_read(count, 16))
-            if not 7 <= end - begin <= 262:
+            if not 2 <= end - begin <= 510:
                 raise ValueError("Unbounded producer output")
             sent.append(bytes(cpu.mem_read(begin, end - begin)))
             return_to_caller()
-        elif not (0x5d3170 <= pc < 0x5d3358 or 0x63dc70 <= pc < 0x63e2f0):
+        elif not (0x5d3170 <= pc < 0x5d3358 or 0x63dc70 <= pc < 0x63e2f0 or
+                  (extended and (0x63cc80 <= pc < 0x63d730 or 0x638420 <= pc < 0x638730))):
             raise ValueError(f"Unapproved producer call {pc:#x}")
 
     cpu.hook_add(UC_HOOK_CODE, hook)
@@ -96,15 +101,23 @@ def capture(main, scratch):
         for index, value in enumerate(arguments):
             cpu.reg_write(getattr(arm64_const, f"UC_ARM64_REG_X{index}"), value)
 
+    def invoke(start):
+        cpu.emu_start(start, stop, timeout=500_000, count=200_000)
+        if cpu.reg_read(UC_ARM64_REG_PC) != stop:
+            raise ValueError("Producer did not return")
+
+    def append(packet):
+        records.append(dict(sequence=len(records) + 1, direction="s2c-game", id=packet[0],
+                            length=len(packet), payload=packet.hex()))
+
     def execute(start, opcode, length, count_offset, count):
-        cpu.emu_start(start, stop, timeout=100_000, count=10_000)
-        if cpu.reg_read(UC_ARM64_REG_PC) != stop or len(sent) != 1:
-            raise ValueError("Producer did not return exactly one packet")
+        invoke(start)
+        if len(sent) != 1:
+            raise ValueError("Producer did not send exactly one packet")
         packet = sent[0]
         if packet[0] != opcode or packet[count_offset] != count or len(packet) != length:
             raise ValueError("Original producer's counted boundary changed")
-        records.append(dict(sequence=len(records) + 1, direction="s2c-game", id=opcode,
-                            length=len(packet), payload=packet.hex()))
+        append(packet)
 
     for payload_count in range(256):
         # The source object's byte span is255 bytes. The original producer
@@ -143,6 +156,48 @@ def capture(main, scratch):
                 execute(start, opcode, header + 4 * count, header - 2, count)
                 if bytes(cpu.mem_read(path, 0x1000)) != before_path:
                     raise ValueError("Producer changed the source path")
+    extra_invocations = 0
+    if extended:
+        # The bit-packet writer stores its complete rounded byte count at1.
+        # Exercise null units and each8/16/32-bit encoding branch independently.
+        values = (0, 1, 255, 256, 65535, 65536, 0x7fffffff, 0xffffffff)
+        for identity in (None,) + values:
+            for i in range(64):
+                if identity is not None:
+                    cpu.mem_write(unit + 8, struct.pack("<I", identity))
+                before_unit = bytes(cpu.mem_read(unit, 0x200))
+                reset([client, 0 if identity is None else unit,
+                       values[i % 8], values[i // 8], values[(i * 3) % 8], values[(i * 3) // 8 % 8]])
+                invoke(0x63cc80)
+                if len(sent) != 1 or sent[0][0] != 0x3e or sent[0][1] != len(sent[0]) or not 2 <= len(sent[0]) <= 34:
+                    raise ValueError("Bit-packet total byte count changed")
+                if bytes(cpu.mem_read(unit, 0x200)) != before_unit:
+                    raise ValueError("Producer changed the source unit")
+                append(sent[0]); extra_invocations += 1
+        # The record writer emits63-record chunks and an explicit final packet,
+        # including an empty final packet for exact multiples of63.
+        rows = data + 0x4000
+        for source_count in list(range(131)) + [189, 252, 255]:
+            source = b"".join(struct.pack("<IIIB3x", i, i * 17, 0, i & 255) for i in range(source_count))
+            if source:
+                cpu.mem_write(rows, source)
+            putq(world + 0x5820, rows); putq(world + 0x5828, source_count)
+            reset([client]); invoke(0x638420)
+            if len(sent) != source_count // 63 + 1:
+                raise ValueError("Record-batch final packet changed")
+            total, identities = 0, []
+            for packet in sent:
+                if packet[0] != 0x70 or packet[1] > 63 or len(packet) != 6 + 8 * packet[1]:
+                    raise ValueError("Original record-batch boundary changed")
+                for i in range(packet[1]):
+                    identity, value, derived = struct.unpack_from("<HHH", packet, 8 + 8 * i)
+                    if value != identity * 17 or derived != identity ^ 0x1234:
+                        raise ValueError("Record-batch source fields changed")
+                    identities.append(identity)
+                total += packet[1]; append(packet)
+            if total != source_count or identities != list(range(source_count)) or (source and bytes(cpu.mem_read(rows, len(source))) != source):
+                raise ValueError("Record batch lost or changed source records")
+            extra_invocations += 1
     scratch.mkdir(parents=True, exist_ok=False)
     capture_path = scratch / "counted-producers.private.jsonl"
     capture_path.write_text("".join(json.dumps(record) + "\n" for record in records))
@@ -150,7 +205,9 @@ def capture(main, scratch):
     report = dict(originalNSOVerified=proof["originalInputVerified"],
                   cases=len(records), payloadCountValuesChecked=256,
                   pathCountValuesChecked=256, pathPagesChecked=[0, 1, 2, 17],
-                  opcodes=["0x71", "0x72", "0x78"],
+                  opcodes=(["0x3e", "0x70"] if extended else []) + ["0x71", "0x72", "0x78"],
+                  extendedProducerInvocations=extra_invocations,
+                  everySourceBatchRecordForwardedOnce=extended,
                   allOriginalProducerBoundariesMatched=True, sourceUnchanged=True,
                   captureSHA256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),
                   syntheticDependenciesOnly=True, gameEntryInvocations=0,
@@ -163,5 +220,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("main", type=Path)
     parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument("--extended", action="store_true", help="Also check bit-packet and63-record batch producers")
     arguments = parser.parse_args()
-    print(json.dumps(capture(arguments.main, arguments.scratch), indent=2))
+    print(json.dumps(capture(arguments.main, arguments.scratch, arguments.extended), indent=2))

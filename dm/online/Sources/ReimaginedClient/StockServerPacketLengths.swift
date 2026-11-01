@@ -2,7 +2,7 @@ import Foundation
 
 /// Server-to-client game-packet metadata for the supported 3.3.94012 engine.
 /// These are packet lengths after transport decoding, not TCP record lengths.
-/// Twelve variable formats are checked against native readers/producers and bounded
+/// Fourteen variable formats are checked against native readers/producers and bounded
 /// original-engine captures. Other variables and the system channel are separate.
 public enum StockServerPacketLengths {
     public enum Descriptor: Equatable {
@@ -26,7 +26,7 @@ public enum StockServerPacketLengths {
         11, 8, 9, 24, 3, 12, -1, 8, -1, 8, -1, 7, -1, 12, -1, // A0
     ]
 
-    public static let supportedVariableOpcodes: [UInt8] = [0x5b, 0x67, 0x71, 0x72, 0x73, 0x78, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
+    public static let supportedVariableOpcodes: [UInt8] = [0x3e, 0x5b, 0x67, 0x70, 0x71, 0x72, 0x73, 0x78, 0x94, 0x9c, 0x9d, 0xa8, 0xaa, 0xac]
 
     public static func descriptor(for opcode: UInt8) -> Descriptor {
         guard Int(opcode) < sizes.count else { return .unsupported }
@@ -47,6 +47,10 @@ public enum StockServerPacketLengths {
             return (minimum...maximum).contains(length) ? .length(length) : .invalid
         }
         switch opcode {
+        case 0x3e:
+            // Total length includes both header bytes; the original writer has
+            // a bounded32-byte bit payload, not an unbounded trailing string.
+            return byteLength(1, minimum: 2, maximum: 34)
         case 0x5b:
             guard prefix.count >= 3 else { return .needMore }
             let length = byte(1) | (byte(2) << 8)
@@ -55,6 +59,11 @@ public enum StockServerPacketLengths {
         case 0x67:
             guard prefix.count >= 21 else { return .needMore }
             return .length(22 + 4 * byte(20))
+        case 0x70:
+            guard prefix.count >= 2 else { return .needMore }
+            let count = byte(1)
+            // Original510-byte send buffer: six header bytes and63 records.
+            return count <= 63 ? .length(6 + 8 * count) : .invalid
         case 0x71, 0x72:
             // Both original producers cap their path batch at15 records. The
             // native receivers copy four bytes per record into a fixed buffer.
