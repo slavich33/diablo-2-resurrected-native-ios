@@ -80,7 +80,8 @@ struct NativeItemStatCostCapture {
 }
 
 /// Truthful partial native environment from captured tables. Resource-bank and
-/// aggregate fingerprints remain unavailable, and sidecar capability stays0.
+/// aggregate fingerprints remain unavailable. Diagnostic capture keeps support0;
+/// prepared peer capture declares the linked v2 codec, independently of admission.
 /// The caller must keep the engine quiescent while acquiring/using this profile
 /// and revalidate before admission; this object does not freeze engine execution.
 struct NativeEnvironmentTableProfile {
@@ -89,6 +90,17 @@ struct NativeEnvironmentTableProfile {
     private let sources: [(edition: UInt8, generation: UInt64, status: Int32, rows: UInt32, names: UInt32)]
 
     static func capture() throws -> Self {
+        try capture(base: EnvironmentDescription.unavailableProfile())
+    }
+
+    /// The real peer startup must first isolate its downloaded namespace. This
+    /// declares the linked v2 codec, not a successful handshake or ready world.
+    static func capturePreparedPeerProfile() throws -> Self {
+        guard nativeSaveIsolated() == 1 else { throw NativeSaveCommitError.invalidScope }
+        return try capture(base: EnvironmentDescription.nativeSidecarCodecProfile())
+    }
+
+    private static func capture(base: EnvironmentDescription) throws -> Self {
         var fields: [EnvironmentItemStatSchema] = [], generations: [UInt8: UInt64] = [:]
         var sources: [(edition: UInt8, generation: UInt64, status: Int32, rows: UInt32, names: UInt32)] = []
         for edition in UInt8(1)...3 {
@@ -106,7 +118,6 @@ struct NativeEnvironmentTableProfile {
                 fields.append(try EnvironmentItemStatSchema(tag: edition, policyVersion: 2, coverage: .unavailable, value: nil))
             }
         }
-        let base = try EnvironmentDescription.unavailableProfile()
         let description = try EnvironmentDescription(contract: base.contract, aggregate: base.aggregate,
             groups: base.groups, banks: base.banks, itemStatSchemas: fields, namedFingerprints: [], optionalFields: [])
         let result = Self(description: description, generations: generations, sources: sources)

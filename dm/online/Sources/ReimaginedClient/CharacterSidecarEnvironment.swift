@@ -1,5 +1,20 @@
 import Foundation
 
+extension EnvironmentDescription {
+    /// This linked native library implements the sidecar v2 codec. The original
+    /// profile constructor advertises support1/format2 before peer admission.
+    /// Data is still unavailable here: no host fingerprints, plugins, admitted
+    /// engine, selected character or server-save authority is inferred.
+    public static func nativeSidecarCodecProfile() throws -> EnvironmentDescription {
+        let base = try unavailableProfile()
+        return try EnvironmentDescription(
+            contract: EnvironmentContract(version: base.contract.version, sidecarCapability: 1,
+                sidecarFormat: CharacterSidecar.formatVersion, word8: base.contract.word8, word10: base.contract.word10),
+            aggregate: base.aggregate, groups: base.groups, banks: base.banks,
+            itemStatSchemas: base.itemStatSchemas, namedFingerprints: [])
+    }
+}
+
 extension CharacterSidecar {
     /// Project known environment records before history/sealing. The caller
     /// supplies its actual client-only counterparts separately; host scope1

@@ -45,6 +45,19 @@ final class EnvironmentDescriptionTests: XCTestCase {
         XCTAssertEqual(try decoded.envelope().encoded(), envelope.encoded())
     }
 
+    func testLinkedNativeCodecProfileDoesNotClaimKnownDataOrAdmission() throws {
+        let base = try EnvironmentDescription.unavailableProfile()
+        let native = try EnvironmentDescription.nativeSidecarCodecProfile()
+        XCTAssertEqual(native.contract.sidecarCapability, 1)
+        XCTAssertEqual(native.contract.sidecarFormat, CharacterSidecar.formatVersion)
+        XCTAssertEqual(try native.envelope().fields[0].payload, Data([2,0,1,0,0,0,2,0,4,0,7,0,0,0]))
+        XCTAssertEqual(native.aggregate, base.aggregate); XCTAssertEqual(native.groups, base.groups)
+        XCTAssertEqual(native.banks, base.banks); XCTAssertEqual(native.itemStatSchemas, base.itemStatSchemas)
+        XCTAssertTrue(native.namedFingerprints.isEmpty); XCTAssertTrue(native.optionalFields.isEmpty)
+        XCTAssertEqual(try EnvironmentDescription.decode(native.envelope()).contract, native.contract)
+        XCTAssertEqual(base.contract.sidecarCapability, 0)
+    }
+
     func testEveryRequiredFieldMustBePresentAndFullyConsumed() throws {
         let fields = try EnvironmentDescription.unavailableProfile().envelope().fields
         for index in fields.indices {

@@ -9,7 +9,28 @@ Requires the owner's exact original core and development-only Unicorn.
 from pathlib import Path
 import argparse, struct, json, os
 from verify_reference_vectors import Reference, EXPECTED
-from unicorn.x86_const import UC_X86_REG_RCX, UC_X86_REG_RDX, UC_X86_REG_R8
+from unicorn.x86_const import UC_X86_REG_RCX, UC_X86_REG_RDX, UC_X86_REG_R8, UC_X86_REG_RBP, UC_X86_REG_RIP
+
+def original_sidecar_support(dll):
+ """Only the two unconditional stores in the pinned profile constructor.
+
+ This is codec support before admission, not a key, selected save or receipt.
+ No call instruction or external operation is allowed in this prefix.
+ """
+ class SupportReference(Reference):
+  def hook(self,mu,pc,size,user):
+   if pc==self.stop:return
+   rva=pc-self.base
+   if rva==0x38fe7e:mu.reg_write(UC_X86_REG_RIP,self.stop);return
+   if rva not in (0x38fe6b,0x38fe74):
+    self.problem='Unexpected native sidecar-support prefix instruction';mu.emu_stop();return
+   super().hook(mu,pc,size,user)
+ r=SupportReference(dll);frame=r.stack+0x10000;r.mu.reg_write(UC_X86_REG_RBP,frame)
+ r.run(0x38fe6b,[])
+ capability=struct.unpack('<I',r.mu.mem_read(frame+0x454,4))[0]
+ format=struct.unpack('<H',r.mu.mem_read(frame+0x312,2))[0]
+ assert (capability,format)==(1,2)
+ return capability,format
 
 class EnvReference(Reference):
  def hook(self,mu,pc,size,user):
@@ -42,6 +63,10 @@ def main():
  if not __debug__: parser.error('Run without -O: the bounded reference requires its assertions')
  if args.dll.stat().st_size>32*1024*1024: parser.error('Oversized original core')
  r=EnvReference(args.dll)
+ capability,format=original_sidecar_support(args.dll)
+ native=baseline();native[0]=struct.pack('<HIHHI',2,capability,format,4,7)
+ data=envelope(native);inp=r.alloc(len(data));r.mu.mem_write(inp,data);out=r.alloc(0x500);r.mu.mem_write(out,bytes(0x500))
+ assert r.run(0x2f7c0,[inp,len(data),out,0],[0])&255
  def frame(fields):
   body=b''.join(struct.pack('<HI',i|0x8000,len(d))+d for i,d in fields);return b'D2EM\3\0'+struct.pack('<I',len(body))+body
  base=list(enumerate(baseline(),1));cases=[('unavailable',frame(base))]
@@ -105,6 +130,7 @@ def main():
   fd=os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
   with os.fdopen(fd,'wb') as f:f.write(data)
  print('Original D2EM parser/local validator:',len(results),'synthetic cases matched;',sum(x['accepted'] for x in results),'accepted; no live admission.')
+ print('Original profile constructor and full parser: sidecar codec support1/format2 verified before admission; data remains unavailable.')
 
 if __name__ == '__main__':
  main()

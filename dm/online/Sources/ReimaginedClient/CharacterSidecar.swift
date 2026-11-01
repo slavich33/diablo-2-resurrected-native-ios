@@ -9,6 +9,7 @@ public enum CharacterSidecarError: Error, Equatable {
 /// wire representation until their gameplay/history/seal meaning is verified.
 /// Structural checks and SHA256 are not signature/provenance verification.
 public struct CharacterSidecar: Equatable {
+    public static let formatVersion: UInt16 = 2
     public static let maximumPayload = 2 * 1024 * 1024
     public let fixedFields: Data // Exactly296 bytes, including the mod-present flag.
     public let texts: [Data] // Two optional UTF8 strings.
@@ -129,7 +130,7 @@ public struct CharacterSidecar: Equatable {
             w.number(UInt64(stat.word30), 4); w.number(UInt64(stat.word2c), 4)
             w.data.append(contentsOf: [stat.byte38, stat.byte39, 0, 0]); w.text(stat.name)
         }
-        var header = SidecarWriter(); header.data = Data([0x44, 0x32, 0x52, 0x4c, 2, 0, 44, 0])
+        var header = SidecarWriter(); header.data = Self.fileHeader
         header.number(UInt64(w.data.count), 4); header.data.append(contentsOf: SHA256.hash(data: w.data)); header.data.append(w.data)
         return header.data
     }
@@ -137,7 +138,7 @@ public struct CharacterSidecar: Equatable {
     public static func decode(_ data: Data) throws -> CharacterSidecar {
         guard (44...(maximumPayload + 44)).contains(data.count) else { throw CharacterSidecarError.size }
         let bytes = Array(data)
-        guard bytes[0..<8].elementsEqual([0x44, 0x32, 0x52, 0x4c, 2, 0, 44, 0]) else { throw CharacterSidecarError.header }
+        guard bytes[0..<8].elementsEqual(fileHeader) else { throw CharacterSidecarError.header }
         let count = (0..<4).reduce(0) { $0 | Int(bytes[8 + $1]) << (8 * $1) }
         guard count == bytes.count - 44 else { throw CharacterSidecarError.size }
         let payload = Data(bytes[44...])
@@ -168,6 +169,10 @@ public struct CharacterSidecar: Equatable {
         }
         guard r.finished else { throw CharacterSidecarError.trailingBytes }
         return try CharacterSidecar(fixedFields: fixed, texts: texts, mod: mod, plugins: plugins, stats: stats)
+    }
+
+    private static var fileHeader: Data {
+        Data([0x44, 0x32, 0x52, 0x4c, UInt8(truncatingIfNeeded: formatVersion), UInt8(formatVersion >> 8), 44, 0])
     }
 }
 

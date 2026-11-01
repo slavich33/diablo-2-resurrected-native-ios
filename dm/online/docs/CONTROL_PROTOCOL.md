@@ -1,6 +1,6 @@
 # Control payload observations
 
-This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. Two bounded live ladder refusals now verify the early uncompressed control-carrier path below; a live Windows session, successful admission and gameplay interoperability remain unverified.
+This is a partial interoperability contract independently derived from static inspection and bounded offline encoder checks of the official D2RLoader 1.3.1-beta core, SHA-256 `2a868d013d2e0830bd2d9e04b918b19e46a73cf726c833e70d089b948fdeb5a2`. No original executable code or game assets are included. Two bounded live ladder refusals and a later full native environment-description exchange verify the early uncompressed control-carrier path below; world entry and gameplay interoperability remain unverified.
 
 ## Observed live control refusal
 
@@ -12,7 +12,9 @@ This verifies an early bidirectional control exchange and an explicit refusal, n
 
 A second bounded check used the same verified revision7 package and native identity, and sent the actual 166-byte `EnvironmentDescription.unavailableProfile()` through kind7 (195 carrier bytes). Before sending, its exact output independently matched a manual encoding and passed the complete pinned original D2EM parser/local validator. This description declares no known data fingerprints, no plugins and no sidecar support; it copies no host fingerprints. The server returned29 total bytes, including its greeting and a kind9 refusal with code22 and three fields empty/ASCII1/ASCII0. Static original comparison branches identify this as a sidecar-capability mismatch. No host profile, character, gameplay command or save write was exchanged. The connection closed and narrow-token revocation request was accepted. The identity-free response is `Fixtures/live-unavailable-environment-rejection.json`.
 
-The native required-field representation and its original-parser reference procedure are documented in [ENVIRONMENT_DESCRIPTION.md](ENVIRONMENT_DESCRIPTION.md). A syntactically valid manifest is not a compatible gameplay environment; the missing sidecar behavior must be implemented before it can truthfully be advertised.
+A later native Mac check used fresh signed revision8, the true native identity and the now implemented sidecar-v2 codec profile (support1/format2; all data fingerprints unavailable). It sent195 bytes of environment carrier and received7521 bytes: the initial2-byte system greeting,31 kind7 fragments containing a6599-byte host profile and an empty kind8 marker. No kind9 refusal occurred. The complete typed host profile, including optional metadata, decoded; no character/game command or save write was sent. TCP was closed and narrow-token revocation accepted. The profile's server metadata/resources stay private.
+
+The native profile factory and original constructor reference are documented in [ENVIRONMENT_DESCRIPTION.md](ENVIRONMENT_DESCRIPTION.md). This verifies the live exchange beyond the previous capability mismatch, not a joined character, world or server-progress save. The original constructor sets codec support before admission; support must not be conflated with game readiness.
 
 ## Shared envelope and opaque messages
 

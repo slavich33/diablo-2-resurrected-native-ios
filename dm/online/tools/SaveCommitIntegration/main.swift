@@ -60,6 +60,8 @@ private func run() throws {
         try require(result == 0, "original-hle-write")
     }
     try require(nativeSaveCompletionEnabled() == 0, "default-unbound")
+    do { _ = try NativeEnvironmentTableProfile.capturePreparedPeerProfile(); throw CheckError.failed("peer-profile-without-isolated-namespace") }
+    catch NativeSaveCommitError.invalidScope {}
     let namespace = try NativeServerSaveNamespace(scope: scope, root: root, snapshotDirectory: snapshot,
         characterName: fixtureName, selectedSave: verified)
     fixture_install_legacy_probes()
@@ -88,7 +90,7 @@ private func run() throws {
                 "unadmitted-refusal-preserves-committed-and-pending-bytes")
     try write(initial)
     try require(fixture_commit() == 0 && fixture_legacy_calls() == 0, "unadmitted-unchanged-commit-without-offline-hooks")
-    let absentTableProfile = try NativeEnvironmentTableProfile.capture()
+    let absentTableProfile = try NativeEnvironmentTableProfile.capturePreparedPeerProfile()
     try require(absentTableProfile.generations.isEmpty && absentTableProfile.description.itemStatSchemas.allSatisfy({ $0.coverage == .unavailable }),
                 "unloaded-tables-never-claim-schema")
     fixture_capture_tables_without_names()
@@ -98,11 +100,11 @@ private func run() throws {
     fixture_capture_tables()
     do { try absentTableProfile.validateCurrent(); throw CheckError.failed("unloaded-profile-survived-new-table-load") }
     catch NativeItemStatCostError.nativeStatus(let status) { try require(status == DM_NET_TABLE_STALE, "new-table-load-invalidates-prior-profile") }
-    let tableProfile = try NativeEnvironmentTableProfile.capture()
+    let tableProfile = try NativeEnvironmentTableProfile.capturePreparedPeerProfile()
     try require(tableProfile.description.itemStatSchemas.map(\.coverage) == [.unavailable, .unavailable, .complete], "actual-capture-edition-availability")
     let profileRoundtrip = try EnvironmentDescription.decode(EnvironmentEnvelope.decode(tableProfile.description.envelope().encoded()))
-    try require(profileRoundtrip.itemStatSchemas == tableProfile.description.itemStatSchemas && profileRoundtrip.contract.sidecarCapability == 0,
-                "captured-schema-wire-roundtrip-without-capability-claim")
+    try require(profileRoundtrip.itemStatSchemas == tableProfile.description.itemStatSchemas && profileRoundtrip.contract.sidecarCapability == 1 &&
+                profileRoundtrip.contract.sidecarFormat == CharacterSidecar.formatVersion, "prepared-native-codec-and-actual-schema-wire-roundtrip")
     var boundInfo = dm_net_itemstatcost_info()
     try require(dm_net_itemstatcost_copy(3, 0, nil, 0, &boundInfo) == DM_NET_TABLE_READY, "bind-actual-table-generation")
     let boundTableGeneration = boundInfo.generation
