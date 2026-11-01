@@ -305,12 +305,28 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
         else svc_net_client_close(regs, body, num == SVC_HOST_NET_GRACEFUL_CLOSE);
         return 1;
     }
+    case SVC_HOST_NET_STATE_LENGTH: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name, "main") || orig_addr != 0x2e4ebc)
+            die("Unsupported state-length reader gate");
+        void svc_net_state_length(uint64_t *);
+        svc_net_state_length(regs); return 1;
+    }
     case SVC_HOST_NET_SMALL_STATE: {
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);
         if (!m || strcmp(m->name, "main") || orig_addr != 0x2ee1c0)
             die("Unsupported small-state receiver gate");
         void svc_net_small_state(uint64_t *, unsigned char *);
         svc_net_small_state(regs, m->base); return 1;
+    }
+    case SVC_HOST_NET_MEDIUM_STATE:
+    case SVC_HOST_NET_BIG_STATE: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        int medium = num == SVC_HOST_NET_MEDIUM_STATE;
+        if (!m || strcmp(m->name, "main") || orig_addr != (medium ? 0x2edb50u : 0x2e7720u))
+            die("Unsupported common-state receiver gate");
+        void svc_net_common_state(uint64_t *, unsigned char *, uint32_t);
+        svc_net_common_state(regs, m->base, medium ? 0x95 : 0x18); return 1;
     }
     case SVC_HOST_ITEM_FORMAT_FLAGS: {
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);

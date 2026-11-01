@@ -760,7 +760,9 @@ for a in sorted(kinds):
 for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'connect'),
                                      (0x841568, 0xd10103ff, 0x841614, 0x99, 'start'),
                                      (0x2c4dd0, 0xa9bc5ffc, 0x2c50e8, 0x9b, 'bootstrap')] if NET_ENGINE_BRIDGE else []) + (
-                                    [(0x2ee1c0, 0xa9bc5ff8, 0x2ee510, 0x9d, 'small_state')] if NET_STATE_PACKETS else []):
+                                    [(0x2ee1c0, 0xa9bc5ff8, 0x2ee510, 0x9d, 'small_state'),
+                                     (0x2edb50, 0xf81a0ffb, 0x2ee188, 0x9e, 'medium_state'),
+                                     (0x2e7720, 0xd10143ff, 0x2e7924, 0x9f, 'big_state')] if NET_STATE_PACKETS else []):
     assert struct.unpack_from('<I', IMG, off)[0] == word and off in set(starts)
     assert struct.unpack_from('<I', IMG, tgt)[0] == 0xd65f03c0
     assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)
@@ -776,6 +778,19 @@ for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'c
     put_branch(off, start); stat('net_' + label + '_guard')
     cuts.append((off, struct.pack('<I', word).hex(), struct.pack('<I', B(off, start)).hex(),
                  f'net-engine-v4: {label} guard; bootstrap failure returns false before startup, prepared/unbound bootstrap resumes; bound start/connect suppress original backend; caller registers/stack preserved', '仅宿主'))
+
+if NET_STATE_PACKETS:
+    # Dispatcher retains its real length comparison. Only its expected size
+    # can change through the scoped service; no global descriptor is modified.
+    off,word = 0x2e4ebc,0xb9400908
+    assert struct.unpack_from('<I',IMG,off)[0] == word and off not in kinds
+    assert not any(seg[0].address <= off < seg[-1].address+4 for seg in windows)
+    start=here();emit(STP_PRE(29,30,31,-16));emit(word)
+    emit_gate_call();emit(BLR(30));ret=here()
+    emit(LDP_POST(29,30,31,16));emit(B(here(),off+4))
+    gates.append((ret,'svc',0xa0,off));put_branch(off,start);stat('net_state_length')
+    cuts.append((off,struct.pack('<I',word).hex(),struct.pack('<I',B(off,start)).hex(),
+                 'state packet length: scoped expected-size service; original comparison and stock descriptor table retained', '仅宿主'))
 
 # Explicit item-format service gates. They preserve the native call-site
 # registers, let the host advance the original bit-reader, then reload only

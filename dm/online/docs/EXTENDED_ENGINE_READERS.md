@@ -29,26 +29,37 @@ the original item decoder without its earlier error. This establishes the
 prefix correction for those items, not arbitrary equipment, gameplay or iPhone
 ladder compatibility.
 
-## Small state packet
+## Extended state packets
 
-The explicit `ReimaginedServerPacketLengths` profile keeps the stock descriptor
-table unchanged. Its `0x96` has11 bytes: opcode, a 32-bit resource, two16-bit
-coordinates and two8-bit destination deltas. The stock packet has9 bytes.
-Treating the extended packet as stock can turn its trailing deltas into false
-packet identifiers.
+The explicit `ReimaginedServerPacketLengths` profile leaves the stock descriptor
+table unchanged and selects these verified peer layouts:
 
-`DM_NET_STATE_PACKETS=1` requires the exact main and engine bridge. Its optional
-`0x96` receiver uses the original engine's unit lookup, stamina update and
-position update methods. It accepts only an exact11-byte borrowed gameplay
-packet in the activated isolated remote scope. An invalid packet fails the
-binding. Unbound calls resume the original receiver. The peer's unusual delta
-boundary is preserved: `0x80` means+128; only `0x81..0xff` are negative.
+| Opcode | Stock bytes | Extended bytes | Payload |
+| --- | ---: | ---: | --- |
+| `0x96` | 9 | 11 | stamina32, x16/y16, two8-bit deltas |
+| `0x95` | 17 | 23 | life32/mana32/stamina32, coordinates/deltas, frame32 |
+| `0x18` | 19 | 25 | medium fields plus two7-bit stats before the coordinates |
 
-The medium (`0x95`) and large (`0x18`) peer readers are also extended. Their
-native adapters remain unfinished; the explicit profile rejects them before
-using a shorter stock length. A subsequent real-peer run stopped cleanly at
-`0x95`, so the new small-state adapter has not yet been exercised on a complete
-live stream. Do not enable this profile as a Play action in the app yet.
+`DM_NET_STATE_PACKETS=1` requires the exact supported main and engine bridge.
+Three optional receivers use the original unit lookup, resource updates and
+position update methods. Medium and big state also preserve conditional revival
+and the native mana-prediction ring, including expiry, signed rejection and
+32-bit wraparound. Big state retains both additional stats. The peer's delta
+boundary is unusual: `0x80` means+128; only `0x81..0xff` are negative.
+
+Each receiver requires an exact borrowed gameplay packet in an activated,
+isolated remote scope. Invalid packets or prediction-ring indices fail the
+binding. Unbound calls resume their original prologues. A separate static
+adapter changes the dispatcher's expected length only in that remote scope;
+its actual length comparison remains active. No global stock descriptor is
+modified. Changing only the Swift framing or only the final receiver would
+leave this earlier native validation incompatible.
+
+A bounded real-peer native Mac run passed the former length assertion and
+consumed medium and small state among333 logical packets. The engine then
+requested a disconnect; its cause and remote-world readiness still need
+verification. Big state has reference checks but no live observation yet.
+Do not expose this profile as a completed Play action in the app.
 
 ## Verification
 
@@ -58,12 +69,15 @@ bash dm/online/Tests/NativeTransportABI/engine.sh
 swift test --package-path dm/online --filter ReimaginedServerPacketLengthsTests
 ```
 
-Development-only bounded comparisons checked1440 item-reader cases and1024
-small-state cases against the owned pinned peer's original leaf/receiver code
-with synthetic API dependencies. Generated ARM64 adapter checks covered192
-item cases and32 small-state gate cases, including bound/unbound control flow,
-registers, stack and cursor preservation. These references invoke no DLL entry,
-game entry, OS or network API and are not a gameplay runtime.
+Development-only bounded comparisons checked1440 item-reader cases and3072
+state receiver cases against the owned pinned peer's original code with
+synthetic API dependencies. Another2048 cases matched the original ARM64
+mana-prediction loop's results and all ring bytes. Generated ARM64 checks cover
+192 item cases,96 receiver entry cases and512 dispatcher-length cases,
+including bound/unbound flow, registers, stack, flags and cursor preservation.
+These references invoke no DLL entry, game entry, OS or network API and are not
+a gameplay runtime. An earlier12412-byte peer capture replays with all
+boundaries preserved and no leftover bytes under the extended profile.
 
 The changed C sources compile for ARM64 iOS16. Unit checks and private Mac
 probes do not establish rendered remote-world play, device input, a server
@@ -72,7 +86,7 @@ before calling ladder support complete. No game data, binaries, captures,
 credentials or character files are part of this source change.
 
 The full independent LLVM structure check also passes on the rewritten main,
-including both item adapters and the small-state gate. It validates the emitted
+including both item adapters, all three state gates and the length adapter. It validates the emitted
 spill/reload instructions and gate metadata separately from the emitter. Run it
 with an installed LLVM toolchain and the owner's original input:
 

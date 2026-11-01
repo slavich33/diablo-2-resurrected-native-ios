@@ -356,6 +356,19 @@ for n, (roff, form) in _hreg.items():
         bad(f'分支门 svc #{n:#x} {roff:#x}：块不符模板'); continue
     if gates.get(ks[0] + 12) != ('svc', n, roff): bad(f'分支门 svc #{n:#x} gates.tsv 行不符：{gates.get(ks[0] + 12)}')
     seen.add(ks[0] + 12); nbranch += 1
+# Scoped packet-length adapter: displaced load, saved FP/LR, exact service and
+# the original length comparison at site+4. The stock table is never changed.
+roff=0x2e4ebc
+if any(c[0] == roff for c in cuts):
+    start=btarget(roff);ks=keyseq(start+8) if start is not None else None
+    ok=start is not None and start>=PO and ks and ks[1]==KEY.get('KGATE')
+    ok=ok and W(pat,start)==0xa9bf7bfd and W(pat,start+4)==0xb9400908 and W(orig,roff)==0xb9400908
+    ok=ok and W(pat,ks[0])==0xf94003de and W(pat,ks[0]+4)==LDR_X29_SP and W(pat,ks[0]+8)==0xd63f03c0
+    ok=ok and W(pat,ks[0]+12)==0xa8c17bfd and W(pat,ks[0]+16)==B(ks[0]+16,roff+4)
+    if not ok: bad('State length: adapter does not match exact template')
+    elif gates.get(ks[0]+12)!=('svc',0xa0,roff): bad('State length: wrong gate metadata')
+    if ks: seen.add(ks[0]+12);nbranch+=1
+
 # Exact item-format adapters have a wider, explicit spill/cursor-reload ABI.
 # Check every word independently of the emitter, in addition to the bounded
 # generated-block execution test. They are optional registered cuts only.

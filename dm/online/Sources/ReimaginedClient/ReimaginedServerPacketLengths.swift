@@ -9,9 +9,10 @@ public enum ReimaginedServerPacketLengths {
         switch opcode {
         // Original peer reader: 32 + 16 + 16 + 8 + 8 payload bits.
         case 0x96: return .length(11)
-        // These peer readers are also extended; their native adapters are not
-        // implemented yet. Never split them using the shorter stock sizes.
-        case 0x18, 0x95: return .unsupported
+        // 3 resources32, coordinates16 each, deltas8 each, frame32.
+        case 0x95: return .length(23)
+        // Big adds two7-bit stats before coordinates (198 bits including ID).
+        case 0x18: return .length(25)
         default: return StockServerPacketLengths.resolve(prefix)
         }
     }
