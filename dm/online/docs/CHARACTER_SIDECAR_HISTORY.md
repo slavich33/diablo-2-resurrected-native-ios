@@ -27,4 +27,4 @@ python dm/online/tools/verify_sidecar_history.py --dll /path/to/your/D2RCore.dll
 swift test --package-path dm/online
 ```
 
-This component does not establish ladder admission or an accepted server progress-save/reload round trip. Completed-file metadata matching, environment projection and atomic D2S+sidecar publication remain required.
+The [commit-session API](CHARACTER_SAVE_COMMIT_SESSION.md) now composes completed-file metadata matching, environment projection and signing/history. The dedicated filesystem gate preserves the existing directory transaction. Their production receiver, authenticated namespace/table leases and server acceptance/reload remain unconnected. This component does not establish ladder admission or accepted progress.

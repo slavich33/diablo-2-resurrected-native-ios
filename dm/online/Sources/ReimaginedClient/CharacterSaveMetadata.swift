@@ -102,14 +102,15 @@ public struct CharacterSaveMetadata: Equatable {
     /// Expected name must come from the selected isolated server character.
     public func verifyVersion105Save(_ data: Data, expectedCharacterName: String) throws {
         let name = Array(expectedCharacterName.utf8)
+        func folded(_ data: Data) -> Data { Data(data.map { (65...90).contains($0) ? $0 + 32 : $0 }) }
         guard (2...15).contains(name.count), name.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) }),
-              characterName == Data(name), data.count >= 403, data.count <= 8 * 1024 * 1024,
+              folded(characterName) == folded(Data(name)), data.count >= 403, data.count <= 8 * 1024 * 1024,
               data.count == Int(saveByteCount) else { throw CharacterSaveMetadataError.saveMismatch }
         let bytes = Array(data)
         func word(_ at: Int) -> UInt32 { (0..<4).reduce(0) { $0 | UInt32(bytes[at + $1]) << (8 * $1) } }
         guard word(0) == 0xaa55aa55, word(4) == 105, word(8) == saveByteCount,
               word(12) == saveChecksum, bytes[248] == gameEdition,
-              Data(bytes[299..<(299 + name.count)]) == characterName,
+              folded(Data(bytes[299..<(299 + name.count)])) == folded(characterName),
               bytes[(299 + name.count)..<395].allSatisfy({ $0 == 0 }),
               Data(SHA256.hash(data: data)) == saveSHA256 else { throw CharacterSaveMetadataError.saveMismatch }
         var checksum: UInt32 = 0

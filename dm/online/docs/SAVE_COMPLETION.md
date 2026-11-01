@@ -8,6 +8,20 @@ A failed close does not advance the completed-D2S sequence or emit an event. On 
 
 The callback may run on an engine IO thread. It must copy the borrowed path, filter its separately verified server namespace, match complete D2S bytes to received metadata and keep sidecar publication inside the same working-directory commit transaction. It must not auto-import arbitrary offline completions. The five existing pre-commit hooks are retained.
 
+## Final commit gate
+
+`dm_online_save_prepare(workdir,commitdir)` runs after all five legacy pre-commit hooks and before cloning the work tree. Its weak default returns0. A linked coordinator may prepare a matching signed sidecar in the same work directory while holding its authenticated namespace/table leases. It must not wait on network or call game filesystem APIs: path/mount locks are held.
+
+A nonzero return defers the commit, preserves both the complete pending work tree and previously committed tree, and sends the existing save-error notification. Missing metadata must not poison a valid work tree and discard progress. An already poisoned writer transaction follows its existing rollback path without entering this gate. If the gate itself poisons the transaction while returning0, that rollback still runs.
+
+`dm_online_save_finished(workdir,commitdir,committed)` is called exactly once for every prepare on the same thread, including a refused prepare, poisoned rollback, failed clone or failed swap. A successful result follows the actual directory swap. Release the coordinator's lease here before the independent post-commit observer. This is local atomicity, not server acceptance. The production defaults remain no-op until an explicitly bound receiver exists.
+
+```sh
+make -C dm/host/tests save-commit-gate
+```
+
+The real filesystem test retains all five legacy hooks, checks deferral/retry without discarded work, injected clone/swap failures, paired publication and balanced completion calls. Its mock sidecar contains synthetic marker bytes rather than a signature; native signing and metadata/history state have separate [commit-session tests](CHARACTER_SAVE_COMMIT_SESSION.md).
+
 Independent IO producers may deliver callbacks out of order. The shared completed-write marker uses an atomic maximum so a late producer cannot move it backward. This does not order serialization or freeze the file at that path; matching actual complete bytes and the active namespace/generation remains mandatory.
 
 ```sh
@@ -16,6 +30,6 @@ make -C dm/host/tests save-completion
 
 The focused test uses the real host filesystem, checks that the descriptor is already closed and bytes readable when the callback runs, verifies writer/rename selection, rejects failed events and confirms rollback keeps the previous committed bytes. Existing filesystem and filename regressions remain separate.
 
-An event alone does not prove checksum validity, commit success, accepted server progress or ladder admission. Native transport, metadata matching and the full save coordinator remain unfinished.
+An event alone does not prove checksum validity, commit success, accepted server progress or ladder admission. The [commit-session API](CHARACTER_SAVE_COMMIT_SESSION.md) handles metadata matching and signed candidates, but its production receiver, actual namespace/table leases and network/save integration remain disconnected.
 
 An isolated original ARM64 Mac run exercised the hook through the game's own Save and Exit path. It observed a1039-byte version105 file with a valid rolling checksum; an independent read of the committed disposable save copy matched the observed digest, and the game returned to its front end. The original source fixture stayed unchanged. This was offline engine-boundary evidence, with no production receiver, server upload or iPhone update.

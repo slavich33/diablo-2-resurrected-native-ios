@@ -7,6 +7,12 @@ B = build
 .DEFAULT_GOAL := run
 .PHONY: net-tables
 .PHONY: save-completion
+.PHONY: save-commit-gate
+save-commit-gate: $(B)/t_save_commit_gate
+	TMPDIR="$(abspath $(B))" $(B)/t_save_commit_gate
+$(B)/t_save_commit_gate: t_save_commit_gate.c t_save_commit_gate_sink.c t_fs_stub.c ../hle_fs.c ../dm_save_completion.h ../hle.h ../dm.h ../dm_i18n.c
+	@mkdir -p $(B)
+	clang -O1 -Wno-unused-function -I.. -o $@ t_save_commit_gate.c t_save_commit_gate_sink.c t_fs_stub.c ../dm_i18n.c
 save-completion: $(B)/t_save_completion
 	TMPDIR="$(abspath $(B))" $(B)/t_save_completion
 $(B)/t_save_completion: t_save_completion.c t_save_completion_sink.c t_fs_stub.c ../hle_fs.c ../dm_save_completion.h ../hle.h ../dm.h ../dm_i18n.c

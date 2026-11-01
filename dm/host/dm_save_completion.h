@@ -14,6 +14,15 @@ enum { DM_SAVE_COMPLETION_CLOSE = 1, DM_SAVE_COMPLETION_RENAME = 2 };
 // both functions and returns nonzero only while its explicit scope is bound.
 int dm_online_d2s_completion_enabled(void);
 void dm_online_d2s_completed(const char *path, uint64_t sequence, int reason);
+// Dedicated final gate AFTER the five legacy side-file hooks, before cloning
+// and atomic directory swap. Zero allows commit; a positive errno defers it,
+// retaining the current work tree and the previous committed tree. Never wait
+// for network here or call back into game FS: path/mount locks are held.
+// finished is called exactly once for every prepare, on this same thread,
+// including a refused prepare or failed clone/swap. It is not a server receipt.
+// A linked coordinator can hold its namespace/generation lease across the pair.
+int dm_online_save_prepare(const char *workdir, const char *commitdir);
+void dm_online_save_finished(const char *workdir, const char *commitdir, int committed);
 #ifdef __cplusplus
 }
 #endif

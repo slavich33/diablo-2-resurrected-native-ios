@@ -1,0 +1,21 @@
+# Native character save commit session
+
+`CharacterSaveCommitSession` connects received kind10 metadata to a complete version105 D2S, environment projection, ItemStatCost descriptors and signed sidecar history. It is a caller-serialized reference object for exactly one admitted connection generation and selected server character. Callers must keep the authenticated namespace and actual table-generation leases for the entire filesystem transaction; constructing this object does not establish those facts.
+
+Initialization requires an independently digest-verified server download. A progressed download requires its matching predecessor sidecar: either verified with the same separately trusted own P-256 key or covered by a separately authenticated unsigned-sidecar digest. Missing/corrupt/foreign-key history never silently starts over. Without a predecessor, only the pristine initial creation header at server version1 is supported. No file is imported, mounted or uploaded by this API.
+
+Each kind10 transfer is fully assembled in wire order, then reset for the next transfer. Metadata must name the selected character using the original ASCII case-insensitive comparison and match its edition. Exact repeats are deduplicated. Conflicting metadata for the same checksum/length/full SHA is rejected. There are at most64 pending records; malformed transfers, conflicts and overflow invalidate the session. Wrong generations fail before touching its state.
+
+`prepare` checks the final complete file after legacy side-file hooks. It matches checksum/length and **whole-file SHA256**, then verifies the version105 header, selected ASCII name, edition and rolling checksum. Missing metadata or a digest mismatch leaves the pending queue unconsumed. A previously committed, unchanged file with no new matching metadata needs no new sidecar.
+
+Matching metadata supplies its stat-usage bitmaps and original contract words. The given immutable table snapshot must have the correct edition and all required names/rows. Environment records are projected through the existing strict sidecar constructor. Metadata's boolean is carried as the original history helper's extra/discontinuity input; no wider gameplay meaning is assigned. Native signing checks the resulting D2S binding. A retry of the same bytes/metadata/descriptors reuses the exact prepared sidecar, including its random history identifier and timestamp.
+
+`complete(...,committed:false)` retains the pending metadata and prepared candidate. Only `committed:true` consumes that exact candidate and advances the local predecessor. A candidate from another session, stale generation or replaced preparation is rejected. Exact consumed metadata is deduplicated in a bounded recent window. This callback describes a **local directory commit**, never a server save receipt or permission to upload.
+
+## Atomic filesystem boundary
+
+The dedicated `dm_online_save_prepare` / `dm_online_save_finished` pair in [SAVE_COMPLETION.md](SAVE_COMPLETION.md) runs around the actual clone/swap operation without taking an existing legacy hook slot. A future receiver must read the final selected D2S within its bound work directory, call this session, write the sidecar there atomically, hold namespace/table leases through the commit and report the actual result. It must not infer a commit from a close sequence or a successful sidecar write alone.
+
+The session and filesystem gate have separate tests. Native session tests cover real signatures/history across two saves, ordered transfers, retry identity, replay/dedup, exact digest rejection, generation/foreign-session rejection, conflicts, broken transfers, queue bounds, missing names/editions and signed/unsigned predecessor trust. Actual filesystem tests cover all five legacy hooks, deferred metadata preserving the work tree, clone/swap failures, paired publication and damaged-write rollback. Their synthetic files are fixtures rather than game progress or a server response.
+
+The production receiver, generation leases, network pump and admitted iPhone play loop are still disconnected. The advertised capability stays0; no live progress upload, phone update or server save/reload is proved by these checks.

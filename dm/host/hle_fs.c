@@ -28,6 +28,8 @@
 // explicitly bound server namespace; an offline completion grants no authority.
 __attribute__((weak)) int dm_online_d2s_completion_enabled(void) { return 0; }
 __attribute__((weak)) void dm_online_d2s_completed(const char *path, uint64_t sequence, int reason) { (void)path; (void)sequence; (void)reason; }
+__attribute__((weak)) int dm_online_save_prepare(const char *workdir, const char *commitdir) { (void)workdir; (void)commitdir; return 0; }
+__attribute__((weak)) void dm_online_save_finished(const char *workdir, const char *commitdir, int committed) { (void)workdir; (void)commitdir; (void)committed; }
 
 #define RES_PATH_NOT_FOUND 0x202u      // fs 模块 2，描述 1 | fs module 2, description 1
 #define RES_PATH_EXISTS    0x402u      // fs 模块 2，描述 2 | fs module 2, description 2
@@ -467,6 +469,20 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     if (i == g_nmnt || !g_mnt[i].commit[0]) { pthread_mutex_unlock(&g_lock); return RES_OK; }   // 非事务挂载：无可提交 | non-transactional mount: nothing to commit
     uint64_t tc0 = clock_gettime_nsec_np(CLOCK_MONOTONIC), tw0 = atomic_exchange(&g_txn_first_ns, 0);
     for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
+    int online_prepared = 0;
+    // An already damaged game transaction follows its existing rollback path.
+    // Missing remote metadata is different: keep the complete work tree for a
+    // later commit instead of discarding progress or publishing an unsigned save.
+    if (!atomic_load(&g_save_poison)) {
+        online_prepared = 1;
+        int online_error = dm_online_save_prepare(g_mnt[i].dir, g_mnt[i].commit);
+        if (online_error) {
+            dm_online_save_finished(g_mnt[i].dir, g_mnt[i].commit, 0);
+            pthread_mutex_unlock(&g_lock);
+            front_save_failed(online_error > 0 ? online_error : EIO);
+            return RES_FAIL;
+        }
+    }
     uint64_t tc1 = clock_gettime_nsec_np(CLOCK_MONOTONIC);   // 写进工作目录的旁路文件随这次提交一起原子换入 | side files written into the working directory are swapped in atomically together with this commit
     int perr = atomic_exchange(&g_save_poison, 0);
     if (perr) {                                                         // 本事务有写失败：拒绝提交、丢弃工作目录 | a write failed in this transaction: refuse the commit, discard the working directory
@@ -491,6 +507,7 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
         else if (renamex_np(re, g_mnt[i].dir, RENAME_SWAP)) { rerr = errno ? errno : EIO; rm_tree(re); }
         else rm_tree(re);                                               // 换下来的被污染工作目录 | The swapped-out tainted work directory
         if (rerr) { save_poison(perr); LOG("【红】存档事务：重新克隆工作目录失败 errno=%d——工作目录不动、保持已污染（下次提交照样拒绝并重试），已提交版本不变", rerr); }
+        if (online_prepared) dm_online_save_finished(g_mnt[i].dir, g_mnt[i].commit, 0);
         pthread_mutex_unlock(&g_lock);
         LOG("【红】存档提交拒绝：本事务有存档写失败 errno=%d（工作目录里 0 字节文件：%s）；已提交版本不变，工作目录%s%s", perr, tl ? torn + 1 : "无", rerr ? "没能重新克隆（见上一行）" : "已从已提交版重新克隆", nopen ? "；【红】仍有存档文件开着" : "");
         front_save_failed(perr);
@@ -507,7 +524,10 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     static int n; if (r == RES_OK) { uint64_t tc2 = clock_gettime_nsec_np(CLOCK_MONOTONIC);
         LOG("存档提交 #%d：%s 原子换入 %s（此前存档写 %d 次）（钩子 %llu 微秒、克隆换入 %llu 微秒、自本事务首次写起 %llu 微秒）", ++n, g_mnt[i].dir, g_mnt[i].commit, atomic_load(&g_save_writes),
             (unsigned long long)((tc1 - tc0) / 1000), (unsigned long long)((tc2 - tc1) / 1000), (unsigned long long)(tw0 ? (tc2 - tw0) / 1000 : 0)); atomic_fetch_add(&g_save_commits, 1);
-        if (g_dm_save_commit_hook) g_dm_save_commit_hook(g_mnt[i].commit); }   // iCloud 同步（cloud_ios.m）：持着锁调，那边只做 clonefile 快照 | iCloud sync (cloud_ios.m): called with the lock held, that side only takes a clonefile snapshot
+    }
+    // Release the remote lease before the independent post-commit observer.
+    if (online_prepared) dm_online_save_finished(g_mnt[i].dir, g_mnt[i].commit, r == RES_OK);
+    if (r == RES_OK && g_dm_save_commit_hook) g_dm_save_commit_hook(g_mnt[i].commit);   // iCloud snapshot; mount/path locks remain held
     pthread_mutex_unlock(&g_lock);
     return r;
 }
