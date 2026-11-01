@@ -154,6 +154,7 @@ int main(int argc, char **argv) {
     assert(regs[0] == 0x42);
     uint64_t generation = dm_net_remote_attach(0x1234);
     assert(generation && !dm_net_remote_attach(0x5678));
+    assert(dm_net_remote_decode_generation() == 0);
     assert(dm_net_remote_connect_requested(generation) == 0);
     assert(dm_net_remote_start_requested(generation) == 0);
     regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 1);
@@ -165,6 +166,7 @@ int main(int argc, char **argv) {
     assert(!dm_net_remote_status(0x5678, &connected, &failed) && connected == -1 && failed == -1);
     assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && !failed);
     assert(!dm_net_remote_activate(generation));
+    assert(dm_net_remote_decode_generation() == generation);
     // The original remote frontend waits for start to become connected before
     // it can progress. A later connect method is not required for this path.
     assert(dm_net_remote_status(0x1234, &connected, &failed) && connected && !failed);
@@ -193,8 +195,15 @@ int main(int argc, char **argv) {
     assert(result[16] == 1 && error == 0 && received[1] - received[0] == 4);
     const unsigned char *borrowed = (const void *)(uintptr_t)received[0];
     assert(borrowed[0] == 0x01);
+    assert(dm_net_remote_held_size(generation, DM_NET_GAMEPLAY, borrowed) == 4);
+    assert(!dm_net_remote_held_size(generation + 1, DM_NET_GAMEPLAY, borrowed));
+    assert(!dm_net_remote_held_size(generation, DM_NET_SYSTEM, borrowed));
+    assert(!dm_net_remote_held_size(generation, DM_NET_GAMEPLAY, borrowed + 1));
+    assert(!dm_net_remote_held_size(generation, 2, borrowed));
     for (int i = 17; i < 24; i++) assert(result[i] == 0xa5);
     assert(!dm_net_remote_close(generation));
+    assert(dm_net_remote_decode_generation() == generation); // borrowed packet still needs its negotiated format
+    assert(dm_net_remote_held_size(generation, DM_NET_GAMEPLAY, borrowed) == 4);
     assert(dm_net_remote_status(0x1234, &connected, &failed) && !connected && failed);
     regs[0] = 0x1234; svc_net_client_idle(regs, 0); assert(regs[0] == 0);
     assert(dm_net_remote_activate(generation) == DM_NET_CLOSED);
@@ -206,10 +215,12 @@ int main(int argc, char **argv) {
     regs[0] = 0x1234;
     svc_net_queue_poll(regs, 0, 1);
     assert(!result[16]);
+    assert(!dm_net_remote_held_size(generation, DM_NET_GAMEPLAY, borrowed));
     assert(dm_net_remote_read(generation, outbound, sizeof(outbound)) == DM_NET_CLOSED);
     regs[0] = 0x1234; regs[1] = (uintptr_t)span;
     svc_net_queue_send(regs, 0); // failed remote session never falls back locally
     assert(!dm_net_remote_detach(generation));
+    assert(dm_net_remote_decode_generation() == 0);
     uint64_t next = dm_net_remote_attach(0x1234); assert(next && next != generation);
     assert(dm_net_remote_feed(generation, DM_NET_SYSTEM, packet, 4) == DM_NET_STALE);
     assert(dm_net_remote_activate(generation) == DM_NET_STALE);

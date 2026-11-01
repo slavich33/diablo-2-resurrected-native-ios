@@ -356,6 +356,33 @@ for n, (roff, form) in _hreg.items():
         bad(f'分支门 svc #{n:#x} {roff:#x}：块不符模板'); continue
     if gates.get(ks[0] + 12) != ('svc', n, roff): bad(f'分支门 svc #{n:#x} gates.tsv 行不符：{gates.get(ks[0] + 12)}')
     seen.add(ks[0] + 12); nbranch += 1
+# Exact item-format adapters have a wider, explicit spill/cursor-reload ABI.
+# Check every word independently of the emitter, in addition to the bounded
+# generated-block execution test. They are optional registered cuts only.
+for roff, flagreg, stateoff, label in [(0x579548,25,8,'header'), (0x57a340,8,0x20,'body')]:
+    if not any(c[0] == roff for c in cuts): continue
+    start = btarget(roff)
+    ks = keyseq(start + 32) if start is not None else None
+    if start is None or start < PO or not ks or ks[1] != KEY.get('KGATE'):
+        bad(f'Item-format {label}: missing gate/key sequence'); continue
+    pair = lambda base,r,s,off: base | (((off//8)&127)<<15) | (s<<10) | (31<<5) | r
+    load = lambda r,off: 0xf9400000 | ((off//8)<<10) | (31<<5) | r
+    before = [pair(0xa9800000,29,30,-112)] + [pair(0xa9000000,r,r+1,pos) for r,pos in [(0,16),(2,32),(4,48),(6,64)]]
+    before += [0xf9002be8, 0x2a0003e0|(flagreg<<16), 0x910003e1|((112+stateoff)<<10)]
+    after = [0xb9005be0] + [pair(0xa9400000,r,r+1,pos) for r,pos in [(0,16),(2,32),(4,48),(6,64)]]
+    after += [load(8,80),0xb9405be0|flagreg,pair(0xa8c00000,29,30,112)]
+    if label == 'header':
+        after += [load(1,stateoff),load(9,stateoff+16),load(8,stateoff+24),W(orig,roff)]
+        after += [B(ks[0]+12+4*len(after),roff+4)]
+    else:
+        after += [load(25,stateoff),load(21,stateoff+16),load(9,stateoff+24),0xb4000057]
+        after += [B(ks[0]+12+4*len(after),roff+4),B(ks[0]+16+4*len(after),0x57a47c)]
+    ok = all(W(pat,start+4*i)==w for i,w in enumerate(before))
+    ok = ok and W(pat,ks[0])==0xf94003de and W(pat,ks[0]+4)==LDR_X29_SP and W(pat,ks[0]+8)==0xd63f03c0
+    ok = ok and all(W(pat,ks[0]+12+4*i)==w for i,w in enumerate(after))
+    if not ok: bad(f'Item-format {label}: adapter does not match exact spill/reload template')
+    if gates.get(ks[0]+12)!=('svc',0x9c,roff): bad(f'Item-format {label}: wrong gate metadata')
+    seen.add(ks[0]+12);nbranch+=1
 if set(gates) != seen: bad(f'gates.tsv 有多余行 {len(set(gates) - seen)}')
 
 # ⑥ 线程槽

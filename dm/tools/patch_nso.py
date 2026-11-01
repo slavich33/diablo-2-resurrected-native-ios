@@ -179,6 +179,12 @@ cuts = list(CUTS.get(BUILD_ID, []))
 # including receive's hidden x8 output. Remote binding is explicit and does
 # not select a remote role, Nintendo login, TCP codec or save synchronization.
 NET_ENGINE_BRIDGE = os.environ.get('DM_NET_ENGINE_BRIDGE') == '1' and NAME == 'main'
+NET_ITEM_FORMAT = os.environ.get('DM_NET_ITEM_FORMAT') == '1' and NAME == 'main'
+NET_STATE_PACKETS = os.environ.get('DM_NET_STATE_PACKETS') == '1' and NAME == 'main'
+if NET_ITEM_FORMAT:
+    assert NET_ENGINE_BRIDGE and BUILD_ID == RULE_BUILD, 'Item reader requires supported explicit engine bridge'
+if NET_STATE_PACKETS:
+    assert NET_ENGINE_BRIDGE and BUILD_ID == RULE_BUILD, 'State reader requires supported explicit engine bridge'
 if NET_ENGINE_BRIDGE:
     assert BUILD_ID == RULE_BUILD, 'Unsupported network-engine module'
     cuts.extend([
@@ -753,7 +759,8 @@ for a in sorted(kinds):
 # first instruction or return via the original function's standalone ret.
 for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'connect'),
                                      (0x841568, 0xd10103ff, 0x841614, 0x99, 'start'),
-                                     (0x2c4dd0, 0xa9bc5ffc, 0x2c50e8, 0x9b, 'bootstrap')] if NET_ENGINE_BRIDGE else []):
+                                     (0x2c4dd0, 0xa9bc5ffc, 0x2c50e8, 0x9b, 'bootstrap')] if NET_ENGINE_BRIDGE else []) + (
+                                    [(0x2ee1c0, 0xa9bc5ff8, 0x2ee510, 0x9d, 'small_state')] if NET_STATE_PACKETS else []):
     assert struct.unpack_from('<I', IMG, off)[0] == word and off in set(starts)
     assert struct.unpack_from('<I', IMG, tgt)[0] == 0xd65f03c0
     assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)
@@ -769,6 +776,42 @@ for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'c
     put_branch(off, start); stat('net_' + label + '_guard')
     cuts.append((off, struct.pack('<I', word).hex(), struct.pack('<I', B(off, start)).hex(),
                  f'net-engine-v4: {label} guard; bootstrap failure returns false before startup, prepared/unbound bootstrap resumes; bound start/connect suppress original backend; caller registers/stack preserved', '仅宿主'))
+
+# Explicit item-format service gates. They preserve the native call-site
+# registers, let the host advance the original bit-reader, then reload only
+# its cursor/count/offset and flags. No runtime code patch or OBS mutation.
+if NET_ITEM_FORMAT:
+    for off, word, flagreg, stateoff, label in [
+            (0x579548, 0xd37df12c, 25, 8, 'header'),
+            (0x57a340, 0xb40009f7, 8, 0x20, 'body')]:
+        actual = struct.unpack_from('<I', IMG, off)[0]
+        assert actual == word, f'Item reader instruction mismatch {off:#x}: {actual:08x}'
+        assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)
+        start = here()
+        emit(STP_PRE(29, 30, 31, -112))
+        for r, pos in [(0,16),(2,32),(4,48),(6,64)]: emit(STP(r,r+1,31,pos))
+        emit(STRX(8,31,80//8))
+        emit(0x2a0003e0 | (flagreg << 16))  # mov w0,wFLAGS
+        emit(ADDI(1,31,112+stateoff))
+        emit_gate_call();emit(BLR(30))
+        ret = here()
+        emit(0xb9000000 | ((88//4)<<10) | (31<<5))  # str w0,[sp,#88]
+        for r,pos in [(0,16),(2,32),(4,48),(6,64)]:emit(LDP(r,r+1,31,pos))
+        emit(LDRX(8,31,80//8))
+        emit(0xb9400000 | ((88//4)<<10) | (31<<5) | flagreg)
+        emit(LDP_POST(29,30,31,112))
+        if label=='header':
+            emit(LDRX(1,31,stateoff//8));emit(LDRX(9,31,(stateoff+16)//8));emit(LDRX(8,31,(stateoff+24)//8))
+            emit(word);emit(B(here(),off+4))
+        else:
+            emit(LDRX(25,31,stateoff//8));emit(LDRX(21,31,(stateoff+16)//8));emit(LDRX(9,31,(stateoff+24)//8))
+            # CBZ cannot reach the distant original body from the patch area.
+            # Choose between two nearby unconditional branches instead.
+            emit(0xb4000000 | (2<<5) | 23)
+            emit(B(here(),off+4));emit(B(here(),0x57a47c))
+        gates.append((ret,'svc',0x9c,off));put_branch(off,start);stat('net_item_'+label)
+        cuts.append((off,struct.pack('<I',word).hex(),struct.pack('<I',B(off,start)).hex(),
+                     'item-format5: explicit flags service; unbound flags/stream preserved; native cursor reloaded', '仅宿主'))
 
 # 私有视觉分支；非OBS，0x85只读查询。只有本实验构建显式opt-in；原Qty/children和Update不变。
 # Private visual branch; not OBS, 0x85 is a read-only query. Only this experimental build explicitly opts in; the original Qty/children and Update are unchanged.

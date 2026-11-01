@@ -25,6 +25,12 @@ int dm_net_remote_error(uint64_t generation);
 // A TCP socket becoming writable is insufficient. This is not game admission.
 // Connected requires this readiness and either original start/connect request.
 int dm_net_remote_activate(uint64_t generation);
+// Activated decoder generation, retained after failure for already borrowed
+// packets until detach. Zero before activation. Not authorization/admission.
+uint64_t dm_net_remote_decode_generation(void);
+// Exact borrowed packet only. Valid until the consumer's next poll; detach
+// requires a quiescent engine. Zero for stale generation/channel/pointer.
+uint32_t dm_net_remote_held_size(uint64_t generation, int channel, const void *bytes);
 int dm_net_remote_connect_requested(uint64_t generation);
 int dm_net_remote_start_requested(uint64_t generation);
 int dm_net_remote_fail(uint64_t generation, int reason);

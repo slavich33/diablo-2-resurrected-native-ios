@@ -305,6 +305,20 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
         else svc_net_client_close(regs, body, num == SVC_HOST_NET_GRACEFUL_CLOSE);
         return 1;
     }
+    case SVC_HOST_NET_SMALL_STATE: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name, "main") || orig_addr != 0x2ee1c0)
+            die("Unsupported small-state receiver gate");
+        void svc_net_small_state(uint64_t *, unsigned char *);
+        svc_net_small_state(regs, m->base); return 1;
+    }
+    case SVC_HOST_ITEM_FORMAT_FLAGS: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name, "main") || (orig_addr != 0x579548 && orig_addr != 0x57a340))
+            die("Unsupported item-format reader gate");
+        void svc_item_format_flags(uint64_t *);
+        svc_item_format_flags(regs); return 1;
+    }
     case SVC_HOST_NET_CLIENT_SEND: svc_net_client_send(regs); return 1;
     case SVC_HOST_NET_CLIENT_POLL: svc_net_client_poll(regs); return 1;
     case SVC_HOST_PRIVATE_SKILL_AIM: { void svc_private_skill_aim(uint64_t *); svc_private_skill_aim(regs); return 1; }

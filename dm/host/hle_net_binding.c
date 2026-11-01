@@ -9,7 +9,7 @@ typedef struct { packet *first, *last; uint32_t bytes, count; } queue;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     uint64_t client, generation, next_generation;
-    int failure, active, connect_requested, start_requested;
+    int failure, active, connect_requested, start_requested, decoding_ready;
     int boot_prepared, boot_applied;
     char boot_host[24];
     uint16_t boot_port;
@@ -59,7 +59,7 @@ uint64_t dm_net_remote_attach(uint64_t client) {
     if (!state.generation) {
         if (!++state.next_generation) ++state.next_generation;
         state.client = client; state.generation = state.next_generation; state.failure = 0;
-        state.active = state.connect_requested = state.start_requested = 0;
+        state.active = state.connect_requested = state.start_requested = state.decoding_ready = 0;
         state.boot_prepared = state.boot_applied = 0;
         memset(state.boot_host, 0, sizeof(state.boot_host)); state.boot_port = 0;
         result = state.generation;
@@ -148,7 +148,13 @@ int dm_net_remote_error(uint64_t generation) {
 int dm_net_remote_activate(uint64_t generation) {
     pthread_mutex_lock(&lock);
     int result = current(generation);
-    if (!result) state.active = 1;
+    if (!result) {state.active = 1;state.decoding_ready = 1;}
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+uint64_t dm_net_remote_decode_generation(void) {
+    pthread_mutex_lock(&lock);
+    uint64_t result = state.decoding_ready ? state.generation : 0;
     pthread_mutex_unlock(&lock);
     return result;
 }
@@ -244,6 +250,15 @@ int dm_net_remote_disconnect(uint64_t client) {
     if (bound) fail(DM_NET_CLOSED);
     pthread_mutex_unlock(&lock);
     return bound;
+}
+uint32_t dm_net_remote_held_size(uint64_t generation, int channel, const void *bytes) {
+    if (channel != DM_NET_SYSTEM && channel != DM_NET_GAMEPLAY) return 0;
+    pthread_mutex_lock(&lock);
+    packet *p = state.held[channel];
+    uint32_t count = generation && generation == state.generation && state.decoding_ready &&
+        p && p->bytes == bytes ? p->count : 0;
+    pthread_mutex_unlock(&lock);
+    return count;
 }
 int dm_net_remote_poll(uint64_t client, int channel, uint64_t *cursor, void *optional_span) {
     if (channel != DM_NET_SYSTEM && channel != DM_NET_GAMEPLAY) return 0;
