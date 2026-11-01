@@ -4,14 +4,15 @@
 用法：casc_overlay.py <RomFS> <输出目录> <替换表.tsv>
 替换表每行「逻辑路径<TAB>新文件」。输出目录 = 覆盖层：改动文件实写，其余逐文件软链接原件；空表 ⇒ 全部链接、逐字节等于原件。
 
-格式（对原版实算核过，游戏实际读取以 DM_FSLOG 为准）：
-- 游戏只读 data/.build.config 与 data/NN-MMMMMMMM.data；*.psv 清单是提取工具产物，游戏不读（这里只借它查路径 → 旧 EKey，
-  再在 TVFS 容器文件表里按该 EKey 唯一命中定位条目，命中数 ≠ 1 即报错）。
+格式（对原版实算核过，游戏实际读取以 DM_FS 为准）：
+- 游戏只读 data/.build.config 与 data/NN-MMMMMMMM.data；*.psv 是可能过时的提取工具清单，不用于选择条目。
+  按实际 TVFS 路径树 → 虚拟文件跨度 → 容器文件表定位；路径不唯一、越界或多跨度文件即报错。
+  整文件替换同时更新容器内容长度与虚拟文件读取长度；共享 EKey 的不同逻辑文件分别定位。
 - .build.config 的 vfs-root（154 字节小 TVFS）按 EKey 引用 vfs-1（全量 TVFS）；vfs-2 与 vfs-root 同键。改文件 ⇒ 新内容、新 vfs-1、
   新 vfs-root 都写进一个新数据档，再改 .build.config 的 vfs-root / vfs-1 / vfs-2 三行及其 -size。
 - EKey（16 字节，key-layout 8 8 40）= MD5(存储头)[:9] + 块号 + 档号 + 40 位偏移；存储头：BLTE 为其头部，裸 zlib / 原样为整段。
 - 按条目规格编码：z = 裸 zlib（级别 9 可逐字节复现原件）、n = 原样、b:… = BLTE（块校验 = MD5(编码块，含模式字节)）。
-- TVFS 容器文件表条目（flags 0x0a）：EKey(16) + 编码长(4) + 规格序号(1) + 内容长(4)。
+- TVFS 容器文件表条目（flags 0x0a）：EKey(16) + 编码长(4) + 规格字符串在 EST 内的字节偏移(1) + 内容长(4)。
 - 新增路径：替换表里逻辑路径前加「+」（如 +data/hd/items/weapon/zswg/axe__the_gnasher.json）。只支持「已有目录下新开一个子目录、里面放文件」：
   新子目录名的首字母不许与该目录现有子项相同（路径树是压缩前缀树，兄弟项首字母互异），按字节序插在兄弟间；新文件在容器文件表 / 文件表末尾各追加一条，
   祖先目录的尺寸与表头偏移随之更新。写完把整棵路径树重新解析一遍，核「原有路径与文件表位置一个不变 + 新路径都在」。
@@ -26,14 +27,15 @@ EKey 或块校验算错时游戏读到新 vfs-root 即退出（有校验）。
 Build-time rewrite of the Switch static CASC: makes the given logical paths point to new content (the native way, no D2R mod, zero runtime changes).
 Usage: casc_overlay.py <RomFS> <output dir> <replacement-table.tsv>
 Each line of the replacement table is "logical path<TAB>new file". Output dir = overlay: changed files are actually written, the rest are symlinked file by file to the originals; empty table ⇒ everything linked, byte-for-byte equal to the originals.
-Format (computed and verified against the original game; what the game actually reads is determined by DM_FSLOG):
-- The game reads only data/.build.config and data/NN-MMMMMMMM.data; the *.psv manifests are output of the extraction tool and the game does not read them (here they are only borrowed to look up path → old EKey,
-  then the entry is located in the TVFS container file table by a unique hit on that EKey; a hit count ≠ 1 is an error).
+Format (computed and verified against the original game; what the game actually reads is determined by DM_FS):
+- The game reads only data/.build.config and data/NN-MMMMMMMM.data. The *.psv extraction manifests may be stale and do not select entries.
+  Resolve the actual TVFS path tree → virtual-file span → container-file entry. Reject ambiguous names, invalid bounds and multi-span files.
+  Whole-file replacements update both container and virtual-file lengths; different logical files sharing an EKey are resolved separately.
 - The vfs-root in .build.config (a small 154-byte TVFS) references vfs-1 (the full TVFS) by EKey; vfs-2 has the same key as vfs-root. Changing a file ⇒ the new content, the new vfs-1 and
   the new vfs-root are all written into one new data archive, then the three lines vfs-root / vfs-1 / vfs-2 in .build.config and their -size are changed.
 - EKey (16 bytes, key-layout 8 8 40) = MD5(storage header)[:9] + chunk number + archive number + 40-bit offset; storage header: for BLTE its header, for raw zlib / as is the whole segment.
 - Encode by entry spec: z = raw zlib (level 9 reproduces the original byte for byte), n = as is, b:... = BLTE (block checksum = MD5(encoded block, including the mode byte)).
-- TVFS container file table entry (flags 0x0a): EKey(16) + encoded length(4) + spec index(1) + content length(4).
+- TVFS container file table entry (flags 0x0a): EKey(16) + encoded length(4) + byte offset of the spec string in EST(1) + content length(4).
 - Adding paths: prefix the logical path in the replacement table with "+" (e.g. +data/hd/items/weapon/zswg/axe__the_gnasher.json). Only "open one new subdirectory under an existing directory and put files in it" is supported:
   the first letter of the new subdirectory name must not equal that of any existing child of that directory (the path tree is a compressed prefix tree, sibling items have distinct first letters), and it is inserted among the siblings in byte order; each new file appends one record at the end of the container file table / file table,
   and the sizes of the ancestor directories and the header offsets are updated accordingly. After writing, the whole path tree is parsed again to verify "no existing path or file table position changed + all new paths present".
@@ -251,7 +253,7 @@ def offset_field_size(size):
 
 
 def add_paths(tvfs, additions):
-    """additions：{逻辑路径 str: (EKey 16 字节, 编码长, 规格序号, 内容长)} → 加好路径的新 TVFS（bytearray） | additions: {logical path str: (EKey 16 bytes, encoded length, spec index, content length)} → new TVFS with the paths added (bytearray)"""
+    """additions: {logical path: (EKey, encoded length, EST byte offset, content length)} → new TVFS."""
     path_off, path_size, vfs_off, vfs_size, cft_off, cft_size = struct.unpack(">IIIIII", tvfs[12:36])
     est_off, est_size = struct.unpack(">II", tvfs[38:46])
     if not (path_off + path_size == est_off and est_off + est_size == cft_off and cft_off + cft_size == vfs_off and vfs_off + vfs_size == len(tvfs)):
@@ -331,33 +333,81 @@ def add_paths(tvfs, additions):
 
 
 def set_cft_sizes(tvfs, pos, encoded_size, content_size):
-    """TVFS 容器文件表条目（本构建 flags=0x0a：带编码规格表、无 CKey）：EKey(16) + 编码长(4) + 规格序号(1) + 内容长(4)。
-    规格序号宽度 = 表示规格表大小所需字节数（vfs-root 表 12 字节、vfs-1 表 13 字节 ⇒ 1），序号原样保留。
-    TVFS container file table entry (this build has flags=0x0a: with encoding spec table, no CKey): EKey(16) + encoded length(4) + spec index(1) + content length(4).
-        Spec index width = number of bytes needed to represent the spec table size (vfs-root table 12 bytes, vfs-1 table 13 bytes ⇒ 1); the index is kept as is."""
+    """Flags0x0a: EKey(16) + encoded length(4) + EST byte offset + content length(4).
+
+    The EST offset width follows the table size. Keep the existing offset;
+    it identifies the start of a NUL-terminated spec, not its ordinal index.
+    """
     est_size = struct.unpack(">I", tvfs[42:46])[0]
     idx = 1 if est_size <= 0xff else 2 if est_size <= 0xffff else 3 if est_size <= 0xffffff else 4
     tvfs[pos + 16:pos + 20] = struct.pack(">I", encoded_size)
     tvfs[pos + 20 + idx:pos + 24 + idx] = struct.pack(">I", content_size)
 
 
-def cft_position(vfs_content, cft_offset, cft_end, manifest, logical):
-    """逻辑路径 → 它在 TVFS 容器文件表里的条目位置（按旧 EKey 唯一命中） | Logical path → the position of its entry in the TVFS container file table (unique hit by the old EKey)"""
-    row = manifest.get(logical)
-    if row is None:
-        die("path not found in build_manifest.psv: " + logical)
-    old_ekey = bytes.fromhex(row[6])
-    matches = []
-    search_at = cft_offset
-    while True:
-        position = vfs_content.find(old_ekey, search_at, cft_end)
-        if position < 0:
-            break
-        matches.append(position)
-        search_at = position + 1
-    if len(matches) != 1:
-        die(f"CFT key match count for {logical}: {len(matches)}")
-    return matches[0]
+def tvfs_path_offsets(tvfs):
+    """Index actual TVFS paths, not a possibly older extraction manifest.
+
+    Values are offsets into the virtual-file table. Keep normalized aliases
+    separate so a requested ambiguous name fails instead of selecting a row.
+    """
+    if len(tvfs) < 46 or tvfs[:4] != b"TVFS" or struct.unpack_from(">I", tvfs, 8)[0] != 0x0a:
+        die("unsupported TVFS header")
+    path_off, path_size, vfs_off, vfs_size, cft_off, cft_size = struct.unpack_from(">6I", tvfs, 12)
+    if any(start < 46 or size <= 0 or start + size > len(tvfs) for start, size in
+           [(path_off, path_size), (vfs_off, vfs_size), (cft_off, cft_size)]):
+        die("invalid TVFS table bounds")
+    result = {}
+    for _, path, value, folder, _ in walk_paths(tvfs, path_off, path_off + path_size):
+        if folder is None:
+            logical = norm_path(path.decode("utf-8", errors="surrogateescape"))
+            result.setdefault(logical, []).append(value)
+    return result
+
+
+def virtual_file_entry(vfs_content, paths, logical):
+    offsets = paths.get(norm_path(logical), [])
+    if len(offsets) != 1:
+        die(f"TVFS path match count for {logical}: {len(offsets)}")
+    vfs_offset, vfs_size, _, cft_size = struct.unpack_from(">4I", vfs_content, 20)
+    field = offset_field_size(cft_size)
+    relative = offsets[0]
+    if relative < 0 or relative + 9 + field > vfs_size:
+        die("TVFS virtual-file entry out of bounds: " + logical)
+    entry = vfs_offset + relative
+    spans = vfs_content[entry]
+    file_offset, _ = struct.unpack_from(">II", vfs_content, entry + 1)
+    if spans != 1 or file_offset != 0:
+        die("unsupported multi-span or partial TVFS file: " + logical)
+    return entry, field
+
+
+def set_virtual_file_size(tvfs, paths, logical, size):
+    if not 0 <= size <= 0xffffffff:
+        die("TVFS replacement exceeds virtual-file size limit")
+    entry, _ = virtual_file_entry(tvfs, paths, logical)
+    struct.pack_into(">I", tvfs, entry + 5, size)
+
+
+def cft_position(vfs_content, cft_offset, cft_end, paths, logical):
+    """Actual path -> virtual-file span -> exact container-file entry.
+
+    Encoding keys can be shared by different logical files, and the PSV may
+    describe an earlier archive. Neither is a safe way to choose a CFT entry.
+    A one-span virtual file may be shorter than its backing container; whole
+    replacements update both lengths instead of retaining that old read limit.
+    """
+    actual_cft, cft_size = struct.unpack_from(">II", vfs_content, 28)
+    if (actual_cft, actual_cft + cft_size) != (cft_offset, cft_end):
+        die("TVFS CFT bounds disagree")
+    entry, field = virtual_file_entry(vfs_content, paths, logical)
+    relative_cft = int.from_bytes(vfs_content[entry + 9:entry + 9 + field], "big")
+    position = cft_offset + relative_cft
+    est_off, est_size = struct.unpack_from(">II", vfs_content, 38)
+    if not est_size or est_size > 255 or est_off + est_size > len(vfs_content):
+        die("unsupported TVFS encoding-spec table")
+    if position < cft_offset or position + 25 > cft_end:
+        die("TVFS container-file entry out of bounds: " + logical)
+    return position
 
 
 def load_vfs1(source):
@@ -377,6 +427,24 @@ def encode_by_espec(content, espec):
     return zlib.compress(content, 9) if espec == "z" else content if espec == "n" else blte_encode(content)
 
 
+def encoding_spec(tvfs, cft_position):
+    """The CFT stores a byte offset in EST, not a string's ordinal index."""
+    est_off, est_size = struct.unpack_from(">II", tvfs, 38)
+    if not est_size or est_size > 255 or est_off + est_size > len(tvfs):
+        die("unsupported TVFS encoding-spec table")
+    relative = tvfs[cft_position + 20]
+    specs = tvfs[est_off:est_off + est_size]
+    if relative >= est_size or (relative and specs[relative - 1] != 0):
+        die("invalid encoding-spec string offset")
+    end = specs.find(b"\0", relative)
+    if end <= relative:
+        die("unterminated or empty encoding spec")
+    try:
+        return specs[relative:end].decode("ascii")
+    except UnicodeDecodeError:
+        die("non-ASCII encoding spec")
+
+
 def ekey_for(encoded, chunk, archive, offset):
     header_size = struct.unpack(">I", encoded[4:8])[0] if encoded[:4] == b"BLTE" else len(encoded)
     return hashlib.md5(encoded[:header_size]).digest()[:9] + bytes((chunk, archive)) + offset.to_bytes(5, "big")   # EKey 前 9 字节 = MD5(BLTE 头)，后 7 字节 = 块号 / 档号 / 偏移（key-layout 8 8 40） | First 9 bytes of EKey = MD5(BLTE header), last 7 bytes = chunk number / archive number / offset (key-layout 8 8 40)
@@ -394,16 +462,14 @@ def write_pack(source, output, replacements, location):
     if (data_dir / name).exists():
         die(f"pack location {name} already exists in source RomFS")
     vfs_content = load_vfs1(source)
-    manifest = read_manifest(source)
+    paths = tvfs_path_offsets(vfs_content)
     cft_offset, cft_size = struct.unpack(">II", vfs_content[28:36])
-    est_off, est_size = struct.unpack(">II", vfs_content[38:46])
-    especs = bytes(vfs_content[est_off:est_off + est_size]).split(b"\0")
     items = []
     for logical, replacement in replacements.items():
         if logical.startswith("+"):
             die("pack 不支持新增路径: " + logical)
-        pos = cft_position(vfs_content, cft_offset, cft_offset + cft_size, manifest, logical)
-        items.append((logical, replacement, especs[vfs_content[pos + 20]].decode()))
+        pos = cft_position(vfs_content, cft_offset, cft_offset + cft_size, paths, logical)
+        items.append((logical, replacement, encoding_spec(vfs_content, pos)))
     output.mkdir(parents=True, exist_ok=True)
     offset = 0
     with (output / name).open("wb") as data, (output / "pack_index.tsv").open("w", encoding="utf-8") as index, cf.ProcessPoolExecutor() as pool:
@@ -444,7 +510,7 @@ def rewrite_tvfs(source, output, replacements, prebuilt=None, link_source=True):
     if len(vfs_content) != vfs_decoded_size or vfs_content[:4] != b"TVFS":
         die("vfs-1 is not a valid TVFS manifest")
 
-    manifest = read_manifest(source)
+    paths = tvfs_path_offsets(vfs_content)
     cft_offset, cft_size = struct.unpack(">II", vfs_content[28:36])
     cft_end = cft_offset + cft_size
     if cft_end > len(vfs_content):
@@ -454,8 +520,8 @@ def rewrite_tvfs(source, output, replacements, prebuilt=None, link_source=True):
     adds = {k[1:]: v for k, v in replacements.items() if k.startswith("+")}
     replacements = {k: v for k, v in replacements.items() if not k.startswith("+")}
     for logical, replacement in replacements.items():
-        updates.append((cft_position(vfs_content, cft_offset, cft_end, manifest, logical), replacement.read_bytes()))
-    prebuilt_pos = [(cft_position(vfs_content, cft_offset, cft_end, manifest, logical), entry) for logical, entry in (prebuilt or {}).items()]
+        updates.append((logical, cft_position(vfs_content, cft_offset, cft_end, paths, logical), replacement.read_bytes()))
+    prebuilt_pos = [(logical, cft_position(vfs_content, cft_offset, cft_end, paths, logical), entry) for logical, entry in (prebuilt or {}).items()]
 
     new_chunk, new_archive = available_location(data_dir)
     new_data = bytearray()
@@ -467,24 +533,32 @@ def rewrite_tvfs(source, output, replacements, prebuilt=None, link_source=True):
         return ekey_for(encoded, new_chunk, new_archive, offset), len(content), len(encoded)
 
     est_off, est_size = struct.unpack(">II", vfs_content[38:46])
-    especs = bytes(vfs_content[est_off:est_off + est_size]).split(b"\0")
-    for pos, content in updates:
-        espec = especs[vfs_content[pos + 20]].decode()   # 规格序号 1 字节（规格表 13 字节） | Spec index is 1 byte (spec table is 13 bytes)
+    for logical, pos, content in updates:
+        espec = encoding_spec(vfs_content, pos)
         ekey, decoded_size, encoded_size = append(content, espec)
         vfs_content[pos:pos + 9] = ekey[:9]
         vfs_content[pos + 9:pos + 16] = ekey[9:]
         set_cft_sizes(vfs_content, pos, encoded_size, decoded_size)
-    for pos, (ekey, encoded_size, decoded_size) in prebuilt_pos:   # 独立数据档里已写好的条目：只改指向，不复制内容 | Entries already written in the standalone data archive: only repoint them, do not copy the content
+        set_virtual_file_size(vfs_content, paths, logical, decoded_size)
+    for logical, pos, (ekey, encoded_size, decoded_size) in prebuilt_pos:   # 独立数据档里已写好的条目：只改指向，不复制内容 | Entries already written in the standalone data archive: only repoint them, do not copy the content
         vfs_content[pos:pos + 16] = ekey
         set_cft_sizes(vfs_content, pos, encoded_size, decoded_size)
+        set_virtual_file_size(vfs_content, paths, logical, decoded_size)
 
     if adds:
-        espec_index = next((i for i, e in enumerate(especs) if e == b"z"), 0)   # 新文件用裸 zlib（与原版小文件同） | New files use raw zlib (same as small files in the original game)
+        # EST references are byte offsets, including when choosing a spec for additions.
+        specs_blob = bytes(vfs_content[est_off:est_off + est_size])
+        espec_index = 0
+        for offset in range(len(specs_blob)):
+            if (offset == 0 or specs_blob[offset - 1] == 0) and specs_blob[offset:offset + 2] == b"z\0":
+                espec_index = offset
+                break
+        espec = specs_blob[espec_index:].split(b"\0", 1)[0].decode("ascii")
         encoded_adds = {}
         for logical, replacement in adds.items():
-            if logical in manifest:
+            if logical in paths:
                 die("新增路径已存在（应作替换）: " + logical)
-            ekey, decoded_size, encoded_size = append(replacement.read_bytes(), especs[espec_index].decode())
+            ekey, decoded_size, encoded_size = append(replacement.read_bytes(), espec)
             encoded_adds[logical] = (ekey, encoded_size, espec_index, decoded_size)
         vfs_content = add_paths(vfs_content, encoded_adds)
     new_vfs_ekey, new_vfs_decoded, new_vfs_encoded = append(bytes(vfs_content))
@@ -502,8 +576,15 @@ def rewrite_tvfs(source, output, replacements, prebuilt=None, link_source=True):
     if len(hits) != 1:
         die(f"vfs-root 里 vfs-1 键命中 {len(hits)} 次（期望 1）")
     pos = hits[0]
+    root_paths = tvfs_path_offsets(root)
+    root_cft, root_cft_size = struct.unpack_from(">II", root, 28)
+    root_files = [logical for logical in root_paths if
+                  cft_position(root, root_cft, root_cft + root_cft_size, root_paths, logical) == pos]
+    if len(root_files) != 1:
+        die("vfs-root does not uniquely name its vfs-1 virtual file")
     root[pos:pos + 16] = new_vfs_ekey
     set_cft_sizes(root, pos, new_vfs_encoded, new_vfs_decoded)
+    set_virtual_file_size(root, root_paths, root_files[0], new_vfs_decoded)
     new_root_ekey, new_root_decoded, new_root_encoded = append(bytes(root))
     data_name = f"{new_chunk:02d}-{new_archive:08d}.data"
     (output / "data" / data_name).write_bytes(new_data)

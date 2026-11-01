@@ -29,6 +29,10 @@ The iOS `NativeEnvironmentTableProfile.capture()` reads full names/rows through 
 
 Capture requires a quiescent engine. `validateCurrent()` rejects changed generations, table availability, row/name counts, including a previously unloaded edition becoming loaded. This check does not freeze engine execution or establish admission. The original `-txt` load produced names in the bounded development capture; ordinary binary-table loading did not. This change does not enable `-txt` in product startup or activate the app's missing game coordinator.
 
+A later native text-load with a signed mod package captured444 rows and444 names. Its numeric schema columns matched the source table, but ten names were lowercased by the native linker, producing a different full-table value from the previously received host profile. Binding original spelling to the same loaded generation remains necessary; the host value must not replace a mismatching native value. This capture did not establish world entry or a server progress-save round trip.
+
+The build-time CASC overlay tool now resolves entries through actual TVFS paths, updates both container and virtual-file lengths, and interprets encoding-spec references as byte offsets in EST. Treating those offsets as string ordinals incorrectly wrapped a raw text resource in BLTE and stopped the native table loader. The regression tests use small owned archives: `python3 dm/tools/test_casc_overlay.py`. Neither the signed mod resources nor native table exports are public fixtures.
+
 ```sh
 python dm/online/tools/verify_itemstatcost_environment.py \
   --dll /path/to/your/D2RCore.dll --main /path/to/your/ExeFS/main
