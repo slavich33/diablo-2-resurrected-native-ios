@@ -105,4 +105,28 @@ public struct ItemStatCostSnapshot {
                 name: Data(name.utf8))
         }
     }
+
+    /// Policy2's full-table environment value. This covers every row in ID
+    /// order, not just stats used by one save. Names must be the actual loaded
+    /// edition's resolved names; a partial capture never claims a known schema.
+    public func environmentSchema() throws -> EnvironmentItemStatSchema {
+        var hash: UInt64 = 0xcbf29ce484222325
+        func byte(_ value: UInt8) { hash = (hash ^ UInt64(value)) &* 0x100000001b3 }
+        func word(_ value: UInt32) { for shift in stride(from: 0, to: 32, by: 8) { byte(UInt8(truncatingIfNeeded: value >> shift)) } }
+        word(UInt32(rowCount))
+        for index in 0..<rowCount {
+            let id = UInt16(index)
+            guard let name = names[id] else { throw CharacterStatUsageError.missingName(id) }
+            word(UInt32(index)); word(UInt32(name.utf8.count))
+            for value in name.utf8 { byte(value) }
+            let base = index * Self.rowBytes
+            for offset in 0x18..<0x1c { byte(bytes[base + offset]) }
+            for offset in 0x20..<0x24 { byte(bytes[base + offset]) }
+            byte(bytes[base + 0x15]); byte(bytes[base + 0x14])
+            byte(bytes[base + 0x0a]); byte(bytes[base + 0x0b])
+            byte((bytes[base + 5] >> 4) & 1) // csvsigned at row word4, bit12.
+            byte(1) // This descriptor has an actual loaded row.
+        }
+        return try EnvironmentItemStatSchema(tag: edition, policyVersion: 2, coverage: .complete, value: hash)
+    }
 }

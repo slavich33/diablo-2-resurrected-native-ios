@@ -66,7 +66,7 @@ int fixture_write(const char *path, const void *bytes, size_t count, int keep_op
 void fixture_close_writer(void) { assert(writer); h_fs_CloseFile(writer); writer = 0; }
 int fixture_commit(void) { return (int)h_fs_Commit("save"); }
 void fixture_fail_next(int kind) { failure = kind; }
-void fixture_capture_tables(void) {
+static void capture_tables(int include_names) {
     unsetenv("DM_NET_TABLE_CAPTURE_DIR");
     g_nmod = 1; strcpy(g_mod[0].name, "main"); g_mod[0].size = 0x2d65000;
     g_mod[0].base = calloc(1, g_mod[0].size); assert(g_mod[0].base);
@@ -74,9 +74,11 @@ void fixture_capture_tables(void) {
     unsigned char rows[324] = {0}; assert(manager);
     linker[3] = 1; linker[4] = (uintptr_t)heads; linker[5] = 1;
     node[1] = (uintptr_t)&node[4]; node[2] = 8; node[3] = (UINT64_C(1) << 63) | 15; memcpy(&node[4], "own_stat", 8);
-    heads[0] = (uintptr_t)node; manager[0x12a8 / 8] = (uintptr_t)linker;
+    heads[0] = (uintptr_t)node; if (include_names) manager[0x12a8 / 8] = (uintptr_t)linker;
     manager[0x1290 / 8] = (uintptr_t)rows; manager[0x1298 / 8] = manager[0x12a0 / 8] = 1;
     memcpy(g_mod[0].base + 0x2d64a18 + 16 * 3, &(uint64_t){(uintptr_t)manager}, 8); regs[23] = (uintptr_t)manager;
     dm_net_tables_install(); assert(table_observer); table_observer(regs);
     free(manager); free(g_mod[0].base); g_mod[0].base = NULL; g_nmod = 0;
 }
+void fixture_capture_tables(void) { capture_tables(1); }
+void fixture_capture_tables_without_names(void) { capture_tables(0); }

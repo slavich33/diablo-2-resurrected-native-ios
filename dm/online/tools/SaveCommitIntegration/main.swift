@@ -88,10 +88,25 @@ private func run() throws {
                 "unadmitted-refusal-preserves-committed-and-pending-bytes")
     try write(initial)
     try require(fixture_commit() == 0 && fixture_legacy_calls() == 0, "unadmitted-unchanged-commit-without-offline-hooks")
+    let absentTableProfile = try NativeEnvironmentTableProfile.capture()
+    try require(absentTableProfile.generations.isEmpty && absentTableProfile.description.itemStatSchemas.allSatisfy({ $0.coverage == .unavailable }),
+                "unloaded-tables-never-claim-schema")
+    fixture_capture_tables_without_names()
+    let namelessProfile = try NativeEnvironmentTableProfile.capture()
+    try require(namelessProfile.generations.isEmpty && namelessProfile.description.itemStatSchemas.allSatisfy({ $0.coverage == .unavailable }),
+                "binary-tables-without-names-never-claim-full-schema")
     fixture_capture_tables()
+    do { try absentTableProfile.validateCurrent(); throw CheckError.failed("unloaded-profile-survived-new-table-load") }
+    catch NativeItemStatCostError.nativeStatus(let status) { try require(status == DM_NET_TABLE_STALE, "new-table-load-invalidates-prior-profile") }
+    let tableProfile = try NativeEnvironmentTableProfile.capture()
+    try require(tableProfile.description.itemStatSchemas.map(\.coverage) == [.unavailable, .unavailable, .complete], "actual-capture-edition-availability")
+    let profileRoundtrip = try EnvironmentDescription.decode(EnvironmentEnvelope.decode(tableProfile.description.envelope().encoded()))
+    try require(profileRoundtrip.itemStatSchemas == tableProfile.description.itemStatSchemas && profileRoundtrip.contract.sidecarCapability == 0,
+                "captured-schema-wire-roundtrip-without-capability-claim")
     var boundInfo = dm_net_itemstatcost_info()
     try require(dm_net_itemstatcost_copy(3, 0, nil, 0, &boundInfo) == DM_NET_TABLE_READY, "bind-actual-table-generation")
     let boundTableGeneration = boundInfo.generation
+    try require(tableProfile.generations[3] == boundTableGeneration, "profile-binds-actual-native-generation")
     var acquired = 0, released = 0, releaseFailure = false
     let session = try CharacterSaveCommitSession(generation: 7, characterName: fixtureName, initialSave: verified,
         environment: EnvironmentMetadata(rootTexts: [Data("own-fixture".utf8), Data()]), clientPlugins: [], signingKey: key)
@@ -186,6 +201,8 @@ private func run() throws {
     }
     try write(fourth); try receive(fourth)
     fixture_capture_tables() // Same fixture bytes, a different published generation.
+    do { try tableProfile.validateCurrent(); throw CheckError.failed("table-profile-survived-reload") }
+    catch NativeItemStatCostError.nativeStatus(let status) { try require(status == DM_NET_TABLE_STALE, "reload-invalidates-environment-profile") }
     try require(fixture_commit() != 0 && coordinator.failureCode != 0, "changed-generation-must-not-rebind-silently")
     try require(try pair().0 == beforeReload.0 && pair().1 == beforeReload.1, "generation-change-preserves-last-verified-pair")
     try require(acquired == released && !releaseFailure, "stale-generation-leaks-no-pin")

@@ -11,6 +11,15 @@ struct NativeItemStatCostCapture {
     let snapshot: ItemStatCostSnapshot
 
     static func load(edition: UInt8, usage: CharacterStatUsage) throws -> Self {
+        try load(edition: edition, requiredIDs: usage.allIDs)
+    }
+
+    /// Full environment capture, independent of a selected save's usage bits.
+    static func loadEnvironment(edition: UInt8) throws -> Self {
+        try load(edition: edition, requiredIDs: nil)
+    }
+
+    private static func load(edition: UInt8, requiredIDs: [UInt16]?) throws -> Self {
         func requireReady(_ status: Int32) throws {
             guard status == DM_NET_TABLE_READY else { throw NativeItemStatCostError.nativeStatus(status) }
         }
@@ -27,7 +36,7 @@ struct NativeItemStatCostCapture {
             try requireReady(dm_net_itemstatcost_copy(UInt32(edition), generation, bytes.baseAddress, bytes.count, &info))
         }
         var names: [UInt16: String] = [:]
-        for id in usage.allIDs {
+        for id in requiredIDs ?? (0..<info.row_count).map({ UInt16($0) }) {
             var required = 0
             try requireReady(dm_net_itemstatcost_name(UInt32(edition), generation, UInt32(id), nil, 0, &required))
             guard (2...1025).contains(required) else { throw NativeItemStatCostError.invalidName(id) }
@@ -67,5 +76,52 @@ struct NativeItemStatCostCapture {
         var info = dm_net_itemstatcost_info()
         let status = dm_net_itemstatcost_copy(UInt32(snapshot.edition), generation, nil, 0, &info)
         guard status == DM_NET_TABLE_READY else { throw NativeItemStatCostError.nativeStatus(status) }
+    }
+}
+
+/// Truthful partial native environment from captured tables. Resource-bank and
+/// aggregate fingerprints remain unavailable, and sidecar capability stays0.
+/// The caller must keep the engine quiescent while acquiring/using this profile
+/// and revalidate before admission; this object does not freeze engine execution.
+struct NativeEnvironmentTableProfile {
+    let description: EnvironmentDescription
+    let generations: [UInt8: UInt64]
+    private let sources: [(edition: UInt8, generation: UInt64, status: Int32, rows: UInt32, names: UInt32)]
+
+    static func capture() throws -> Self {
+        var fields: [EnvironmentItemStatSchema] = [], generations: [UInt8: UInt64] = [:]
+        var sources: [(edition: UInt8, generation: UInt64, status: Int32, rows: UInt32, names: UInt32)] = []
+        for edition in UInt8(1)...3 {
+            var info = dm_net_itemstatcost_info()
+            let status = dm_net_itemstatcost_copy(UInt32(edition), 0, nil, 0, &info)
+            guard status == DM_NET_TABLE_READY || status == DM_NET_TABLE_UNAVAILABLE || status == DM_NET_TABLE_CAPTURE_FAILED else {
+                throw NativeItemStatCostError.nativeStatus(status)
+            }
+            sources.append((edition, info.generation, status, info.row_count, info.resolved_names))
+            if status == DM_NET_TABLE_READY && info.row_count > 0 && info.resolved_names == info.row_count {
+                let capture = try NativeItemStatCostCapture.loadEnvironment(edition: edition)
+                guard capture.generation == info.generation else { throw NativeItemStatCostError.nativeStatus(Int32(DM_NET_TABLE_STALE)) }
+                fields.append(try capture.snapshot.environmentSchema()); generations[edition] = capture.generation
+            } else {
+                fields.append(try EnvironmentItemStatSchema(tag: edition, policyVersion: 2, coverage: .unavailable, value: nil))
+            }
+        }
+        let base = try EnvironmentDescription.unavailableProfile()
+        let description = try EnvironmentDescription(contract: base.contract, aggregate: base.aggregate,
+            groups: base.groups, banks: base.banks, itemStatSchemas: fields, namedFingerprints: [], optionalFields: [])
+        let result = Self(description: description, generations: generations, sources: sources)
+        try result.validateCurrent()
+        return result
+    }
+
+    func validateCurrent() throws {
+        for source in sources {
+            var info = dm_net_itemstatcost_info()
+            let status = dm_net_itemstatcost_copy(UInt32(source.edition), 0, nil, 0, &info)
+            guard status == source.status, info.generation == source.generation,
+                  info.row_count == source.rows, info.resolved_names == source.names else {
+                throw NativeItemStatCostError.nativeStatus(Int32(DM_NET_TABLE_STALE))
+            }
+        }
     }
 }

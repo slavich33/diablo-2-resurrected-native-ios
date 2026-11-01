@@ -8,6 +8,7 @@ void fixture_close_writer(void);
 int fixture_commit(void);
 void fixture_fail_next(int kind);
 void fixture_capture_tables(void);
+void fixture_capture_tables_without_names(void);
 void fixture_install_legacy_probes(void);
 int fixture_legacy_calls(void);
 int fixture_cloud_probe_calls(void);

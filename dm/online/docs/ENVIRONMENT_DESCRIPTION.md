@@ -19,6 +19,23 @@ A rollup's unavailable state requires count0/no digest; partial requires a posit
 
 `unavailableProfile()` produces166 bytes and advertises no known fingerprints, banks, schemas, named records, plugins or sidecar capability. Contract words2/0/0/4/7 and policy versions4/4/2 match independently addressed original decoder defaults. Native struct layout has padding and is not the packed wire layout. The actual Swift output SHA256 is `93e5cb7b60a0dde292f70ad16fcec2fd9f4957440282f14647d66bc6330cea33`; it matched independent encoding and the full original parser/local validator. It remains an unsupported gameplay profile.
 
+## Native loaded ItemStatCost schema
+
+`ItemStatCostSnapshot.environmentSchema()` calculates policy2's full-table value from copied ARM64 rows and their actual resolved names. This is independent of the smaller set of descriptors used by a selected save. The full original schema builder/name-cache lookup/hash matched67 synthetic cases across all three editions, row counts, relevant columns, irrelevant-column mutations, name lengths/UTF8 and name order. Native Swift and that original algorithm also match on a stored native engine capture of368 rows and368 names. The capture is private development evidence and is not distributed.
+
+The value is FNV-1a64 over little-endian row count:u32, followed by each row in numeric-ID order: ID:u32, UTF8 name byte count:u32, name bytes, Save Add:u32, Save Param Bits:u32, Save Bits:u8, ValShift:u8, CSvBits:u8, CSvParam:u8, CSvSigned:u8 and row-present:u8. Each copied native row is present. A missing resolved name throws instead of substituting another edition's name or claiming a partial table is complete. Native columns and the324-byte stride are separately checked against the exact ARM64 initializer.
+
+The iOS `NativeEnvironmentTableProfile.capture()` reads full names/rows through the real C capture API. Unloaded, failed or nameless binary-table captures remain unavailable; only a complete named capture supplies a known schema and its generation. The helper constructs a truthful partial D2EM description: aggregate/groups, banks and named fingerprints remain unavailable/empty, and sidecar capability stays0. It does not copy a Windows/host fingerprint or infer mod compatibility from a matching schema.
+
+Capture requires a quiescent engine. `validateCurrent()` rejects changed generations, table availability, row/name counts, including a previously unloaded edition becoming loaded. This check does not freeze engine execution or establish admission. The original `-txt` load produced names in the bounded development capture; ordinary binary-table loading did not. This change does not enable `-txt` in product startup or activate the app's missing game coordinator.
+
+```sh
+python dm/online/tools/verify_itemstatcost_environment.py \
+  --dll /path/to/your/D2RCore.dll --main /path/to/your/ExeFS/main
+```
+
+The reference executes only the original schema builder/hash with private synthetic table resources and uncontended lock stand-ins; no original OS, DLL/game entry point or network operation runs. Optional `--captured-rows`/`--captured-names` verify a separately owned private C diagnostic export without writing it or including it in the synthetic corpus. The coupled native C/Swift filesystem tool also checks missing names, edition availability, field5 roundtrip and rejection after a real capture-generation reload.
+
 ## Optional metadata and sidecar projection
 
 `EnvironmentMetadata` implements known optional fields16..18, which must not carry the required flag. Each text has a u16 byte length<=1024. The environment codec preserves raw byte strings; it does not silently convert invalid UTF8 or embedded NUL into a different identity.
@@ -33,7 +50,7 @@ A plugin's first and fourth texts must be nonempty. Identity is the pair role/fi
 
 `CharacterSidecar(fixedFields:environmentMetadata:clientPlugins:stats:)` projects the two root texts, inserts an empty third text into the mod's five-text sidecar record and copies its word/boolean into word/scope. It uses only environment plugins with scope2/3, then appends the caller's explicitly supplied actual client scope1 records. Host scope1 plugins are never relabeled as client counterparts. The mod-present word is set before the existing sidecar validator checks all text, record-count and duplicate constraints. Sidecar UTF8/NUL/required-text rules are stricter than the environment's byte-string rules; an unsupported projection throws instead of losing information. Apply projection before history/signing.
 
-This mapping follows the pinned original D2S completion wrapper; the whole Windows filesystem wrapper was not executed. The native projection tests cover scope separation, mod/text placement, absent fields, codec round trip, own-key signing and stricter-text refusal. This API does not authenticate a host profile, obtain native fingerprints, select a server namespace, commit files or upload progress. The production completion receiver/coordinator remains disconnected and capability remains0.
+This mapping follows the pinned original D2S completion wrapper; the whole Windows filesystem wrapper was not executed. The native projection tests cover scope separation, mod/text placement, absent fields, codec round trip, own-key signing and stricter-text refusal. This metadata API does not authenticate a host profile, obtain native fingerprints, select a server namespace, commit files or upload progress. The linked local save receiver is tested separately; the actual app/network coordinator remains disconnected and capability remains0.
 
 ## Reproduce
 
@@ -56,4 +73,4 @@ The reference pins the whole core, bounds instructions/memory/copies and substit
 
 ## Live boundary
 
-The bounded native Mac check reached a real server refusal code22 after sending this all-unavailable profile: sidecar capability server1/client0. See [CONTROL_PROTOCOL.md](CONTROL_PROTOCOL.md). There was no character transfer or save write. Advertising1 before implementing compatible sidecar behavior would be inaccurate. Actual fingerprint generation, plugin counterparts, full peer/admission state, gameplay transport and engine/save integration remain required; parsing required fields alone does not enable ladder play.
+The bounded native Mac check reached a real server refusal code22 after sending this all-unavailable profile: sidecar capability server1/client0. See [CONTROL_PROTOCOL.md](CONTROL_PROTOCOL.md). There was no character transfer or save write. Advertising1 before implementing compatible sidecar behavior would be inaccurate. The later loaded-table schema work has not been sent to a live peer. Aggregate/bank/resource fingerprints, plugin counterparts, full peer/admission state, gameplay transport and actual engine/save integration remain required; calculating a native schema alone does not enable ladder play.
