@@ -5,6 +5,12 @@ PY ?= $(DM_ROOT)/build/cache/dm/venv/bin/python
 EXEFS ?= $(DM_ROOT)/data/switch/3.3.94012/Update/ExeFS
 B = build
 .DEFAULT_GOAL := run
+.PHONY: net-levels
+net-levels: $(B)/t_net_level_packets
+	$(B)/t_net_level_packets
+$(B)/t_net_level_packets: t_net_level_packets.c ../dm_net_level_packets.c ../dm_net_level_packets.h ../dm_net_level_allocations.c ../dm_net_level_allocations.h ../hle_net_level_packets.c ../dm_net_level_native.h ../dm_net_level_sites.inc
+	@mkdir -p $(B)
+	clang -std=c11 -O1 -g -Wall -Wextra -Werror -I.. t_net_level_packets.c ../dm_net_level_packets.c ../dm_net_level_allocations.c ../hle_net_level_packets.c -o $@
 .PHONY: net-tables
 .PHONY: save-completion
 .PHONY: save-commit-gate

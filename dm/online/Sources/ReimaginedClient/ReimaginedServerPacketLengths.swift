@@ -7,6 +7,11 @@ public enum ReimaginedServerPacketLengths {
     public static func resolve(_ prefix: Data) -> GamePacketLength {
         guard let opcode = prefix.first else { return .needMore }
         switch opcode {
+        // Explicit 16-bit level/object-interaction peer profile.
+        case 0x07, 0x08: return .length(7)
+        case 0x51: return .length(15)
+        case 0x60: return .length(14)
+        case 0x82: return .length(81)
         // Original peer reader: 32 + 16 + 16 + 8 + 8 payload bits.
         case 0x96: return .length(11)
         // 3 resources32, coordinates16 each, deltas8 each, frame32.

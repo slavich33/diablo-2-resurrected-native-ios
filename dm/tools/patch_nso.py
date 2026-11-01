@@ -181,10 +181,21 @@ cuts = list(CUTS.get(BUILD_ID, []))
 NET_ENGINE_BRIDGE = os.environ.get('DM_NET_ENGINE_BRIDGE') == '1' and NAME == 'main'
 NET_ITEM_FORMAT = os.environ.get('DM_NET_ITEM_FORMAT') == '1' and NAME == 'main'
 NET_STATE_PACKETS = os.environ.get('DM_NET_STATE_PACKETS') == '1' and NAME == 'main'
+NET_LEVEL_PACKETS = os.environ.get('DM_NET_LEVEL_PACKETS') == '1' and NAME == 'main'
 if NET_ITEM_FORMAT:
     assert NET_ENGINE_BRIDGE and BUILD_ID == RULE_BUILD, 'Item reader requires supported explicit engine bridge'
 if NET_STATE_PACKETS:
     assert NET_ENGINE_BRIDGE and BUILD_ID == RULE_BUILD, 'State reader requires supported explicit engine bridge'
+if NET_LEVEL_PACKETS:
+    assert NET_STATE_PACKETS and NET_ENGINE_BRIDGE and BUILD_ID == RULE_BUILD, 'Level readers require the supported state/engine bridge'
+    level_sites = os.environ.get('DM_NET_LEVEL_SITES', os.path.join(os.path.dirname(__file__), '../host/dm_net_level_sites.inc'))
+    for line in open(level_sites):
+        if line.startswith('/*'): continue
+        match = re.fullmatch(r'DM_LEVEL_FIELD\((0x[0-9a-f]+), (0x[0-9a-f]+), (\d+), (\d+), ([A-Z_]+)\)\s*', line)
+        assert match, 'Invalid peer field-site manifest'
+        site, word = int(match[1], 16), int(match[2], 16)
+        cuts.append((site, struct.pack('<I', word).hex(), '411400d4',
+                     'net-level: exact scoped field/allocator adapter; ordinary object layout preserved', '仅宿主'))
 if NET_ENGINE_BRIDGE:
     assert BUILD_ID == RULE_BUILD, 'Unsupported network-engine module'
     cuts.extend([
@@ -763,7 +774,12 @@ for off, word, tgt, number, label in ([(0x8404d4, 0xa9ba6ffc, 0x840d14, 0x98, 'c
                                      (0x2c4dd0, 0xa9bc5ffc, 0x2c50e8, 0x9b, 'bootstrap')] if NET_ENGINE_BRIDGE else []) + (
                                     [(0x2ee1c0, 0xa9bc5ff8, 0x2ee510, 0x9d, 'small_state'),
                                      (0x2edb50, 0xf81a0ffb, 0x2ee188, 0x9e, 'medium_state'),
-                                     (0x2e7720, 0xd10143ff, 0x2e7924, 0x9f, 'big_state')] if NET_STATE_PACKETS else []):
+                                     (0x2e7720, 0xd10143ff, 0x2e7924, 0x9f, 'big_state')] if NET_STATE_PACKETS else []) + (
+                                    [(0x2e6900, 0xf81c0ff7, 0x2ec288, 0xa3, 'level_reveal'),
+                                     (0x2e6a70, 0xa9bc5ff8, 0x2ec288, 0xa4, 'level_hide'),
+                                     (0x2e93e0, 0xd10083ff, 0x2ec288, 0xa5, 'level_object'),
+                                     (0x2e9c50, 0xd100c3ff, 0x2ec288, 0xa6, 'level_warp'),
+                                     (0x2ec150, 0xa9bb67fa, 0x2ec288, 0xa7, 'level_link')] if NET_LEVEL_PACKETS else []):
     assert struct.unpack_from('<I', IMG, off)[0] == word and off in set(starts)
     assert struct.unpack_from('<I', IMG, tgt)[0] == 0xd65f03c0
     assert off < TEXT_END and off not in kinds and not any(seg[0].address <= off < seg[-1].address + 4 for seg in windows)

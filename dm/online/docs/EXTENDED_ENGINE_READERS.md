@@ -60,10 +60,47 @@ consumed medium and small state among333 logical packets. The premature
 disconnect was subsequently traced to the original backend session monitor;
 the scoped coordinator monitor now keeps the real bound connection active.
 A later20-second run processed original native HID movement and applied the
-new server position to the same native player. The matching shader cache was
-absent, so its magenta screenshots do not prove a rendered remote world.
+new server position to the same native player. Its missing shader cache was
+subsequently rebuilt for the exact engine chain. After the additional level
+adapters below, a bounded real-peer native Mac run rendered the remote camp,
+processed native HID movement and completed without a packet-framing error.
 Big state has reference checks but no live observation yet.
 Do not expose this profile as a completed Play action in the app.
+
+## Extended levels, objects and portals
+
+`DM_NET_LEVEL_PACKETS=1` additionally requires the supported state/engine
+bridge. The peer profile selects these layouts without editing the stock table:
+
+| Opcode | Stock bytes | Extended bytes | Changed fields |
+| --- | ---: | ---: | --- |
+| `0x07` | 6 | 7 | reveal level16 |
+| `0x08` | 6 | 7 | hide level16 |
+| `0x51` | 14 | 15 | object interaction16 |
+| `0x60` | 12 | 14 | interaction16, destination level16 |
+| `0x82` | 80 | 81 | portal level16; following coordinates/state shift |
+
+Changing packet boundaries alone is insufficient: the old native object layout
+stores only the interaction's low byte and allocates120 bytes. The scoped
+allocator requests128 bytes, records the exact allocation and removes ownership
+before the original release. Interaction access uses byte8 and byte0x78 while
+preserving flags byte9. Untracked120-byte objects retain their original accesses.
+The destination WORD is stored separately at unit+0x1be, preserving state byte1bb.
+The map bodies retain their original execution with a scoped full-width read;
+object creation uses the original constructor. Warp/link updates preserve the
+observed unit-lookup, conditional update and link-call order.
+
+Every field adapter is registered in `dm_net_level_sites.inc`. The rewriter
+checks original bytes; the independent structural verifier additionally checks
+the original instruction kind, offset, registers and exact single-service cut.
+Invalid/unborrowed packets fail the remote binding; unbound entry gates resume
+the original prologues. No packet bytes or global offline layout are rewritten.
+
+The bounded Mac run received16,644 bytes, queued2,813 original client bytes and
+completed without an unsupported-packet error. A fresh authenticated server
+download advanced its version and passed its digest check. Only nine save bytes
+changed, so this **does not establish persisted gameplay progress** or a tested
+save reload. The physical iPhone game coordinator remains unfinished.
 
 ## Verification
 
@@ -71,6 +108,8 @@ Do not expose this profile as a completed Play action in the app.
 bash dm/online/Tests/NativeTransportABI/items.sh
 bash dm/online/Tests/NativeTransportABI/engine.sh
 swift test --package-path dm/online --filter ReimaginedServerPacketLengthsTests
+make -C dm/host/tests net-levels
+python3 -m unittest discover -s dm/verify -p test_net_level_fields.py
 ```
 
 Development-only bounded comparisons checked1440 item-reader cases and3072
@@ -88,6 +127,13 @@ probes do not establish rendered remote-world play, device input, a server
 progress commit, save reload or reconnection on iPhone. Those are still required
 before calling ladder support complete. No game data, binaries, captures,
 credentials or character files are part of this source change.
+
+Level/portal checks additionally compare1024 receiver cases with full unit/object
+memory and dependency-call order, all65536 interaction values, and320 generated
+entry-gate cases. C fixtures exercise short packets, neighbor preservation,
+old120-byte buffers, allocation capacity and address reuse under ASan/UBSan.
+The Swift suite has143 passing tests. These checks do not establish compatibility
+with every peer item/variable packet or iPhone ladder gameplay.
 
 The full independent LLVM structure check also passes on the rewritten main,
 including both item adapters, all three state gates and the length adapter. It validates the emitted

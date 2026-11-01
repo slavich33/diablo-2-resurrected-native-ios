@@ -37,6 +37,7 @@
 import sys, os, re, struct, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(__file__))
 import nsoimg
+from net_level_fields import load_fields, check_cut as check_field_cut
 DM_ROOT = os.environ.get('DM_ROOT') or os.path.expanduser('~/dm-work')   # 工作区根目录（游戏文件、产物、运行现场都在它下面） | Workspace root (game files, build outputs and run artifacts are all under it)
 
 LLVM = os.environ.get('LLVM_BIN', '/opt/homebrew/opt/llvm@23/bin')
@@ -137,9 +138,25 @@ for l in open(os.path.join(os.path.dirname(__file__), '..', 'host', 'hle.h'), en
     m = re.match(r'//\s+(0x[0-9a-fA-F]+)\s.*?\s(0x[0-9a-fA-F]+)（([^）]*)', l)
     if m: _hreg[int(m[1], 16)] = (int(m[2], 16), m[3])
 def _bl(w, o): return o + 4 * (((w & 0x3FFFFFF) ^ 0x2000000) - 0x2000000) if w & 0xFC000000 == 0x94000000 else None
+_fieldreg = {}
+if any(n == 0xa2 for n in _hostcall.values()):
+    try:
+        with open(os.path.join(os.path.dirname(__file__), '..', 'host', 'dm_net_level_sites.inc')) as f:
+            _fieldreg = load_fields(f.read(), orig)
+    except ValueError as e:
+        bad(f'Field manifest: {e}')
 for a, n in _hostcall.items():
     if n not in _hreg: bad(f'宿主调用 svc #{n:#x}：hle.h 登记表没有对应行'); continue
     roff, form = _hreg[n]
+    if n == 0xa2 and form.startswith('字段门'):
+        cut = next(c for c in cuts if c[0] <= a < c[0] + len(c[2]))
+        try:
+            if mod != 'main' or cut[0] != a:
+                raise ValueError('Field cut must start at its exact main-module site')
+            check_field_cut(_fieldreg, a, cut[1], cut[2], n)
+        except ValueError as e:
+            bad(f'Field service {a:#x}: {e}')
+        continue
     if mod != 'main' or roff != a: bad(f'宿主调用 svc #{n:#x} 在 {mod} {a:#x}，登记表写 main {roff:#x}'); continue
     nbw = next(c[2] for c in cuts if c[0] <= a < c[0] + len(c[2]))
     mt = re.search(r'\bbl (0x[0-9a-fA-F]+)', form)

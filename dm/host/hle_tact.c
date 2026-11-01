@@ -22,6 +22,7 @@
 // an offline cross-check of all 4,979 files before character select (558.8 MiB of output) gives MD5 == the list's CKey.
 #include "hle.h"
 #include "dm_net_engine.h"
+#include "dm_net_level_native.h"
 #include "../third_party/libdeflate/libdeflate.h"
 #include <CommonCrypto/CommonDigest.h>
 #include <fcntl.h>
@@ -312,12 +313,33 @@ uint64_t svc_host_call(int num, uint64_t *regs, uint64_t orig_addr) {
         svc_net_session_poll(regs, (uintptr_t)m->base + 0x179b9c, (uintptr_t)m->base + 0x2d9f438);
         return 1;
     }
+    case SVC_HOST_NET_LEVEL_ENTRY:
+    case SVC_HOST_NET_LEVEL_HIDE:
+    case SVC_HOST_NET_LEVEL_OBJECT:
+    case SVC_HOST_NET_LEVEL_WARP:
+    case SVC_HOST_NET_LEVEL_LINK: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        uint32_t opcode = orig_addr == 0x2e6900 ? 0x07 : orig_addr == 0x2e6a70 ? 0x08 :
+            orig_addr == 0x2e93e0 ? 0x51 : orig_addr == 0x2e9c50 ? 0x60 : orig_addr == 0x2ec150 ? 0x82 : 0;
+        int expected = opcode==0x07 ? SVC_HOST_NET_LEVEL_ENTRY : opcode==0x08 ? SVC_HOST_NET_LEVEL_HIDE :
+            opcode==0x51 ? SVC_HOST_NET_LEVEL_OBJECT : opcode==0x60 ? SVC_HOST_NET_LEVEL_WARP : SVC_HOST_NET_LEVEL_LINK;
+        if (!m || strcmp(m->name,"main") || !opcode || num!=expected) die("Unsupported peer level receiver");
+        svc_net_level_entry(regs,m->base,opcode);return 1;
+    }
+    case SVC_HOST_NET_LEVEL_FIELD: {
+        module_t *m = module_of((const void *)(uintptr_t)regs[30]);
+        if (!m || strcmp(m->name,"main") || !svc_net_level_field(regs,m->base,orig_addr))
+            die("Unsupported peer level field");
+        return 1;
+    }
     case SVC_HOST_NET_STATE_LENGTH: {
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);
         if (!m || strcmp(m->name, "main") || orig_addr != 0x2e4ebc)
             die("Unsupported state-length reader gate");
         void svc_net_state_length(uint64_t *);
-        svc_net_state_length(regs); return 1;
+        svc_net_state_length(regs);
+        if (gate_svc_present(SVC_HOST_NET_LEVEL_ENTRY)) svc_net_level_length(regs);
+        return 1;
     }
     case SVC_HOST_NET_SMALL_STATE: {
         module_t *m = module_of((const void *)(uintptr_t)regs[30]);
